@@ -30,6 +30,7 @@ Each dictionary gets two tables: `{dict}_entries` for word senses, `{dict}_examp
 | `cn_definition` | TEXT | NULLABLE | Chinese definition for this sense, trimmed. For xref entries: the descriptive text (e.g. `"past tense of go"`, `"（mouse 的复数）"`) |
 | `cross_ref` | TEXT | NULLABLE | Target word when this entry is a pure cross-reference. Oxford: extracted from `<a>` inside `xr-g > xr`. Collins: extracted from `<a class="see">` or caption text. **NULL for regular entries** |
 | `sense_order` | INTEGER | NOT NULL DEFAULT 1 | Ordinal within a (word, pos) group, starting from 1. Xref entries always `1` |
+| `pronunciation` | TEXT | NULLABLE | JSON array of IPA strings, e.g. `["rɪˈfjuːz"]` for single-region, `["ˈrekɔːd","ˈrekərd"]` for UK+US variants. NULL when no pronunciation found. POS-based differentiation is handled by the entry's `pos` column — entries for different POS of the same word may have different pronunciations |
 
 **Constraints & Indexes:**
 - `UNIQUE (word, pos, sense_order)` — composite unique covering the primary lookup pattern
@@ -92,6 +93,7 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 3. **cn_definition**: `span.def_cn` text within each `collins_en_cn` div
 4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words
 5. **sense_order**: Enumerate `collins_en_cn` divs within a (word, pos) group
+6. **pronunciation**: `_extract_collins_pronunciation()` — `span.pron` at `word_entry` level → `span.pron.type_uk` and `span.pron.type_us`. IPA text has HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`. Stored as JSON array.
 
 #### Cross-reference entry detection
 
@@ -117,6 +119,7 @@ HTML structure: `span.entry` → `span.p-g` (POS groups) → `span.n-g` (sense g
 3. **cn_definition**: `span.oalecd8e_chn` within `span.def-g` under each `n-g`
 4. **Examples**: Each `span.x-g` within an `n-g` → `span.x.oalecd8e_switch_lang` is `en_example`, the sibling `span.oalecd8e_chn` is `cn_example`
 5. **sense_order**: Enumerate `n-g` blocks within each `p-g`
+6. **pronunciation**: `_extract_oxford_pronunciation()` — `span.ei-g` blocks containing `span.phon-gb` (UK) and `span.phon-usgb`/`span.phon-us` (US). Two placement patterns: (a) word-level in `top-g > ei-g` (e.g. "refuse" verb/noun are separate entries), (b) per-POS inside `p-g > ei-g` (e.g. "record" noun `p-g` has `ˈrekɔːd`, verb `p-g` has `rɪˈkɔːd`). Checks the POS-group container first, falls back to `top-g`.
 
 #### Cross-reference entry detection
 
@@ -170,11 +173,13 @@ Arguments:
 
 ### Step 3: `ecd` CLI
 
-Shell or Python script in project root:
-- `ecd <word>` — query both dictionaries, display formatted results
+Python script in project root:
+- `ecd <word>` — query both dictionaries, display formatted results with pronunciation
 - `ecd -s collins <word>` / `ecd -s oxford <word>` — single dictionary
 - `ecd <chinese>` — FTS5 reverse lookup
 - For xref entries: display "→ see `<cross_ref>`" and optionally follow the ref
+- **Pronunciation display**: Parsed from JSON array, displayed as `发音: /IPA1/ | /IPA2/`
+- **Lookup history**: Stored in `~/.ecd_lookup.db` (separate from stateless `ecd.db`). `record_lookup()` upserts the queried word with count + timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions and empty results are not recorded. History survives `ecd.db` rebuilds.
 
 ## Verification
 
@@ -204,9 +209,18 @@ sqlite3 ../ecd.db "SELECT word, cn_definition, cross_ref FROM oxford_entries WHE
 sqlite3 ../ecd.db "SELECT word, cn_definition, cross_ref FROM collins_entries WHERE word='mice'"
 # → mice | Mice is the plural of mouse.（mouse 的复数）| mouse
 
+# Spot-check pronunciation
+sqlite3 ../ecd.db "SELECT word, pos, pronunciation FROM oxford_entries WHERE word='record'"
+# → noun entries show ["ˈrekɔːd","ˈrekərd"]; verb entries show ["rɪˈkɔːd","rɪˈkɔːrd"]
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE pronunciation IS NOT NULL"
+# → ~60k entries have pronunciation
+
+# Lookup history (separate DB)
+sqlite3 ~/.ecd_lookup.db "SELECT * FROM lookup_history"
+
 # CLI tests
 ./ecd hello
-./ecd 你好
+./ecd 水
 ./ecd -s oxford beauty
 ./ecd went
 ```

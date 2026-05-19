@@ -2,25 +2,83 @@
 """Query the ecd dictionary database.
 
 Usage:
-  ecd <word>               Search both dictionaries for English word
+  ecd                       Enter interactive mode
+  ecd <word>                Search both dictionaries for English word
   ecd <chinese-text>        Reverse lookup: search Chinese for English entries
   ecd -s collins <word>     Search Collins only
   ecd -s oxford <word>      Search Oxford only
 """
 
 import argparse
+import atexit
+import difflib
+import json
 import os
 import re
 import sqlite3
 import sys
 
+try:
+    import readline
+except ImportError:
+    readline = None
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ecd.db")
+HISTORY_DB = os.path.expanduser("~/.ecd_lookup.db")
+
+HISTFILE = os.path.expanduser("~/.ecd_history")
+
+
+def _save_history():
+    try:
+        readline.write_history_file(HISTFILE)
+    except (PermissionError, OSError):
+        pass
+
+
+if readline:
+    try:
+        readline.read_history_file(HISTFILE)
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    atexit.register(_save_history)
 
 CJK_RE = re.compile(r"[一-鿿㐀-䶿豈-﫿]")
 
 
 def is_chinese_query(text):
     return bool(CJK_RE.search(text))
+
+
+def _ensure_history_db():
+    conn = sqlite3.connect(HISTORY_DB)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lookup_history (
+            word TEXT NOT NULL PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 1,
+            last_query TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def record_lookup(word):
+    conn = _ensure_history_db()
+    conn.execute(
+        """
+        INSERT INTO lookup_history (word, count, last_query)
+        VALUES (?, 1, datetime('now'))
+        ON CONFLICT(word) DO UPDATE SET
+            count = count + 1,
+            last_query = datetime('now')
+        """,
+        (word,),
+    )
+    conn.commit()
+    conn.close()
 
 
 def format_entry(word, pos, cn_def, cross_ref, source_label):
@@ -41,7 +99,7 @@ def search_english(db, word, source=None):
     for src in sources:
         rows = db.execute(
             f"""
-            SELECT e.id, e.word, e.pos, e.cn_definition, e.cross_ref, e.sense_order
+            SELECT e.id, e.word, e.pos, e.cn_definition, e.cross_ref, e.sense_order, e.pronunciation, e.extra_notes
             FROM {src}_entries e
             WHERE e.word = ? COLLATE NOCASE
             ORDER BY e.pos, e.sense_order
@@ -50,7 +108,7 @@ def search_english(db, word, source=None):
         ).fetchall()
 
         for row in rows:
-            entry_id, w, pos, cn_def, cross_ref, sense_order = row
+            entry_id, w, pos, cn_def, cross_ref, sense_order, pronunciation, extra_notes = row
             examples = db.execute(
                 f"""
                 SELECT en_example, cn_example
@@ -68,10 +126,68 @@ def search_english(db, word, source=None):
                     "cn_definition": cn_def,
                     "cross_ref": cross_ref,
                     "sense_order": sense_order,
+                    "pronunciation": pronunciation,
+                    "extra_notes": extra_notes,
                     "examples": [(e[0], e[1]) for e in examples],
                 }
             )
     return results
+
+
+def search_english_prefix(db, word, source=None):
+    """Search by English word prefix. Returns list like search_english."""
+    sources = [source] if source else ["collins", "oxford"]
+    results = []
+    for src in sources:
+        rows = db.execute(
+            f"""
+            SELECT e.id, e.word, e.pos, e.cn_definition, e.cross_ref, e.sense_order, e.pronunciation, e.extra_notes
+            FROM {src}_entries e
+            WHERE e.word LIKE ? COLLATE NOCASE
+            ORDER BY e.word, e.pos, e.sense_order
+            """,
+            (word + "%",),
+        ).fetchall()
+
+        for row in rows:
+            entry_id, w, pos, cn_def, cross_ref, sense_order, pronunciation, extra_notes = row
+            examples = db.execute(
+                f"""
+                SELECT en_example, cn_example
+                FROM {src}_examples
+                WHERE entry_id = ?
+                ORDER BY example_order
+                """,
+                (entry_id,),
+            ).fetchall()
+            results.append(
+                {
+                    "source": src,
+                    "word": w,
+                    "pos": pos,
+                    "cn_definition": cn_def,
+                    "cross_ref": cross_ref,
+                    "sense_order": sense_order,
+                    "pronunciation": pronunciation,
+                    "extra_notes": extra_notes,
+                    "examples": [(e[0], e[1]) for e in examples],
+                }
+            )
+    return results
+
+
+def search_english_fuzzy(db, word, source=None):
+    """Fuzzy search for English words. Returns list of close match strings."""
+    sources = [source] if source else ["collins", "oxford"]
+    prefix = word[0] if word else ""
+    candidates = set()
+    for src in sources:
+        rows = db.execute(
+            f"SELECT DISTINCT word FROM {src}_entries WHERE word LIKE ? COLLATE NOCASE",
+            (prefix + "%",),
+        ).fetchall()
+        candidates.update(r[0] for r in rows)
+    return difflib.get_close_matches(word, candidates, n=5, cutoff=0.75)
 
 
 def search_chinese(db, text, source=None):
@@ -116,6 +232,16 @@ def print_results_english(results):
         if r["cross_ref"]:
             header += f"  -> see: {r['cross_ref']}"
         print(header)
+
+        # Display pronunciation
+        if r.get("pronunciation"):
+            try:
+                ipas = json.loads(r["pronunciation"])
+                if ipas:
+                    print(f"  发音: {' | '.join(ipas)}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         if r["cn_definition"]:
             print(f"  释义: {r['cn_definition']}")
         for en, cn in r["examples"]:
@@ -125,6 +251,31 @@ def print_results_english(results):
                 print(f"  例: {en}")
             elif cn:
                 print(f"  例译: {cn}")
+        # Display extra_notes (usage notes, etc.)
+        if r.get("extra_notes"):
+            try:
+                notes = json.loads(r["extra_notes"])
+                for note in notes:
+                    note_type = note.get("type", "")
+                    type_label = {
+                        "usage": "用法",
+                        "drv": "派生",
+                        "regional": "地域",
+                        "sense": "释义补充",
+                        "quotation": "引文",
+                        "phrase": "短语",
+                        "note": "注",
+                    }.get(note_type, note_type)
+                    en = note.get("en", "")
+                    cn = note.get("cn", "")
+                    if en and cn:
+                        print(f"  [{type_label}] {en} / {cn}")
+                    elif en:
+                        print(f"  [{type_label}] {en}")
+                    elif cn:
+                        print(f"  [{type_label}] {cn}")
+            except (json.JSONDecodeError, TypeError):
+                pass
         print()
 
 
@@ -139,6 +290,77 @@ def print_results_chinese(results):
         print()
 
 
+def handle_query(db, query, source):
+    if is_chinese_query(query):
+        results = search_chinese(db, query, source)
+        if not results:
+            print(f"No results for: {query}")
+            return
+        print_results_chinese(results)
+        record_lookup(query)
+    else:
+        results = search_english(db, query, source)
+        if results:
+            print_results_english(results)
+            record_lookup(query.lower())
+            return
+
+        # No exact match — try prefix search
+        prefix_results = search_english_prefix(db, query, source)
+        if prefix_results:
+            distinct_words = sorted(set(r["word"] for r in prefix_results))
+            if len(distinct_words) == 1:
+                word = distinct_words[0]
+                print_results_english(prefix_results)
+                record_lookup(word.lower())
+            else:
+                print(f"Did you mean: {', '.join(distinct_words[:10])}?")
+            return
+
+        # No prefix match — try fuzzy search
+        fuzzy_matches = search_english_fuzzy(db, query, source)
+        if fuzzy_matches:
+            print(f"Did you mean: {', '.join(fuzzy_matches)}?")
+            return
+
+        # Fall through to Chinese FTS5
+        results_cn = search_chinese(db, query, source)
+        if results_cn:
+            print_results_chinese(results_cn)
+            record_lookup(query)
+        else:
+            print(f"No results for: {query}")
+
+
+def interactive(db, source):
+    print("ecd interactive mode. Type .help for commands, .exit or Ctrl-D to quit.\n")
+    while True:
+        try:
+            query = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not query:
+            continue
+
+        if query.startswith("."):
+            cmd = query.lower()
+            if cmd in (".exit", ".quit", ".q"):
+                break
+            elif cmd == ".help":
+                print("Commands: .exit .quit .q .help")
+                print("Enter any English or Chinese text to search.")
+                continue
+            else:
+                print(f"Unknown command: {query}")
+                continue
+
+        handle_query(db, query, source)
+        if readline:
+            _save_history()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Query the ecd dictionary database"
@@ -151,12 +373,10 @@ def main():
     )
     parser.add_argument(
         "query",
-        nargs="+",
+        nargs="*",
         help="Word or phrase to look up",
     )
     args = parser.parse_args()
-
-    query = " ".join(args.query)
 
     if not os.path.exists(DB_PATH):
         print(f"Error: database not found at {DB_PATH}", file=sys.stderr)
@@ -165,23 +385,11 @@ def main():
 
     db = sqlite3.connect(DB_PATH)
 
-    if is_chinese_query(query):
-        results = search_chinese(db, query, args.source)
-        if not results:
-            print(f"No results for: {query}")
-            sys.exit(0)
-        print_results_chinese(results)
+    if args.query:
+        query = " ".join(args.query)
+        handle_query(db, query, args.source)
     else:
-        results = search_english(db, query, args.source)
-        if not results:
-            # Try Chinese search as fallback
-            results_cn = search_chinese(db, query, args.source)
-            if results_cn:
-                print_results_chinese(results_cn)
-            else:
-                print(f"No results for: {query}")
-            sys.exit(0)
-        print_results_english(results)
+        interactive(db, args.source)
 
 
 if __name__ == "__main__":

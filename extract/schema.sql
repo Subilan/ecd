@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS collins_entries (
     pos TEXT NOT NULL DEFAULT '',
     cn_definition TEXT,
     cross_ref TEXT,
-    sense_order INTEGER NOT NULL DEFAULT 1
+    sense_order INTEGER NOT NULL DEFAULT 1,
+    pronunciation TEXT,
+    extra_notes TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collins_entries_word_pos_sense
@@ -31,7 +33,9 @@ CREATE TABLE IF NOT EXISTS oxford_entries (
     pos TEXT NOT NULL DEFAULT '',
     cn_definition TEXT,
     cross_ref TEXT,
-    sense_order INTEGER NOT NULL DEFAULT 1
+    sense_order INTEGER NOT NULL DEFAULT 1,
+    pronunciation TEXT,
+    extra_notes TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_oxford_entries_word_pos_sense
