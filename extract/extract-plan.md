@@ -26,11 +26,12 @@ Each dictionary gets two tables: `{dict}_entries` for word senses, `{dict}_examp
 |--------|------|----------|-------------|
 | `id` | INTEGER PK | — | Auto-increment row ID |
 | `word` | TEXT | NOT NULL | Headword, trimmed. e.g. `"abject"`, `"water"`, `"went"` |
-| `pos` | TEXT | NULLABLE | Part of speech, trimmed. Collins: `"N-COUNT"`, `"ADJ-GRADED"`, `"VERB"`; Oxford: `"noun [U]"`, `"verb [I]"`, `"verb [T]"`. **NULL for pure cross-reference entries** |
+| `pos` | TEXT | NULLABLE | Part of speech, trimmed. Collins: `"N-COUNT"`, `"ADJ-GRADED"`, `"VERB"`; Oxford: `"noun [U]"`, `"verb [I]"`, `"verb [T]"`, `"IDM phrase"` for idioms. **NULL for pure cross-reference entries** |
 | `cn_definition` | TEXT | NULLABLE | Chinese definition for this sense, trimmed. For xref entries: the descriptive text (e.g. `"past tense of go"`, `"（mouse 的复数）"`) |
 | `cross_ref` | TEXT | NULLABLE | Target word when this entry is a pure cross-reference. Oxford: extracted from `<a>` inside `xr-g > xr`. Collins: extracted from `<a class="see">` or caption text. **NULL for regular entries** |
 | `sense_order` | INTEGER | NOT NULL DEFAULT 1 | Ordinal within a (word, pos) group, starting from 1. Xref entries always `1` |
 | `pronunciation` | TEXT | NULLABLE | JSON array of IPA strings, e.g. `["rɪˈfjuːz"]` for single-region, `["ˈrekɔːd","ˈrekərd"]` for UK+US variants. NULL when no pronunciation found. POS-based differentiation is handled by the entry's `pos` column — entries for different POS of the same word may have different pronunciations |
+| `extra_notes` | TEXT | NULLABLE | JSON array of `{"type": "...", "en": "...", "cn": "..."}` objects. Collins: extracted from `<figure class="note type-*">` elements (usage notes, regional variants, derived forms, quotations, etc.). Oxford: reserved for future use. NULL when no extra notes |
 
 **Constraints & Indexes:**
 - `UNIQUE (word, pos, sense_order)` — composite unique covering the primary lookup pattern
@@ -91,9 +92,10 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 1. **Word**: `span.word_key` text, fallback to `<h1>` text
 2. **POS**: `span.st` text (COBUILD codes like `N-COUNT`, `ADJ-GRADED`, `VERB`). Use `.//text()` to handle inner elements
 3. **cn_definition**: `span.def_cn` text within each `collins_en_cn` div
-4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words
-5. **sense_order**: Enumerate `collins_en_cn` divs within a (word, pos) group
-6. **pronunciation**: `_extract_collins_pronunciation()` — `span.pron` at `word_entry` level → `span.pron.type_uk` and `span.pron.type_us`. IPA text has HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`. Stored as JSON array.
+4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words. **Exclude `<li>` inside `<figure class="note">` elements** — those are extra_notes, not examples.
+5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`. Two formats: (a) `<li><p>en</p><p>cn</p></li>` inside figure (usage/sense/derived-form notes), (b) inline text with `.def_cn` spans (regional notes like "in AM, use…"). Orphan figures outside `.collins_en_cn` (e.g. quotation notes) are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
+6. **sense_order**: Enumerate `collins_en_cn` divs within a (word, pos) group
+7. **pronunciation**: `_extract_collins_pronunciation()` — `span.pron` at `word_entry` level → `span.pron.type_uk` and `span.pron.type_us`. IPA text has HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`. Stored as JSON array.
 
 #### Cross-reference entry detection
 
@@ -115,22 +117,25 @@ HTML structure: `span.entry` → `span.p-g` (POS groups) → `span.n-g` (sense g
 #### Regular entry extraction
 
 1. **Word**: `span.h` text, fallback to `<h1>` text
-2. **POS**: Per `p-g` block: `span.pos` text (use `.//text()` to handle `<a>` tags inside) + `span.gr` text (if present), joined with a space. e.g. `"noun"` + `"[U]"` → `"noun [U]"`
-3. **cn_definition**: `span.oalecd8e_chn` within `span.def-g` under each `n-g`
-4. **Examples**: Each `span.x-g` within an `n-g` → `span.x.oalecd8e_switch_lang` is `en_example`, the sibling `span.oalecd8e_chn` is `cn_example`
-5. **sense_order**: Enumerate `n-g` blocks within each `p-g`
-6. **pronunciation**: `_extract_oxford_pronunciation()` — `span.ei-g` blocks containing `span.phon-gb` (UK) and `span.phon-usgb`/`span.phon-us` (US). Two placement patterns: (a) word-level in `top-g > ei-g` (e.g. "refuse" verb/noun are separate entries), (b) per-POS inside `p-g > ei-g` (e.g. "record" noun `p-g` has `ˈrekɔːd`, verb `p-g` has `rɪˈkɔːd`). Checks the POS-group container first, falls back to `top-g`.
+2. **POS**: Depends on pattern:
+   - Patterns 1/3: Per `p-g` block: `span.pos` text + `span.gr` text (if present), joined with a space.
+   - Pattern 2: Per `n-g`: `span.pos` from `top-g > block-g > pos-g` + `.gr` spans inside `n-g`. Handled by `_oxford_pos_for_ng()`.
+   - Pattern 4: `span.pos` from `top-g > block-g > pos-g` + `.gr` spans in `top-g` or `h-g`. Handled by `_oxford_make_pos()`.
+   - Pattern 4b (idioms): POS is `"IDM <phrase>"` from `.id` text inside `.id-g`.
+3. **cn_definition**: `span.oalecd8e_chn` within `span.def-g` under each `n-g` (Patterns 1/2), or directly under `h-g`/`p-g` (Patterns 3/4), or under `ids-g > id-g > sense-g > def-g` (Pattern 4b)
+4. **Examples**: Each `span.x-g` within an `n-g` or directly under `h-g`/`p-g` → `span.x.oalecd8e_switch_lang` is `en_example`, the sibling `span.oalecd8e_chn` is `cn_example`
+5. **sense_order**: Enumerate sense blocks within each `p-g` (Patterns 1/3) or `h-g` (Patterns 2/4)
+6. **pronunciation**: `_extract_oxford_pronunciation()` — `span.ei-g` blocks containing `span.phon-gb` (UK) and `span.phon-usgb`/`span.phon-us` (US). Two placement patterns: (a) word-level in `top-g > ei-g` (e.g. "refuse" verb/noun are separate entries), (b) per-POS inside `p-g > ei-g` (e.g. "record" noun `p-g` has `ˈrekɔːd`, verb `p-g` has `rɪˈkɔːd`). Checks the POS-group container first, falls back to `top-g`. For Pattern 4, checks `h-g` first, falls back to `top-g`.
 
 #### Cross-reference entry detection
 
 An Oxford entry is a pure xref when:
-- Has `span.xr-g` (in `span.sense-g`)
-- Has NO `span.p-g` blocks
-- Has NO `span.n-g` blocks
+- Has `span.xr-g` (in `span.sense-g`) AND NO `span.p-g` blocks AND NO `span.n-g` blocks
+- OR has `.entry > span.derived` with a parent-word link and no `.p-g`, `.n-g`, `.def-g`, `.ids-g` (derived-form redirects like "abasement" → "abase")
 
 Extraction for xref:
-1. **cross_ref**: `<a>` text inside `xr-g > xr` (e.g. `<a href="bword://go">go</a>` → `"go"`)
-2. **cn_definition**: Full text of `span.xr-g` (e.g. "past tense of go")
+1. **cross_ref**: For `.xr-g` entries: `<a>` text inside `xr-g > xr` (e.g. `<a href="bword://go">go</a>` → `"go"`). For `.derived` entries: `<a>` text inside `.derived`.
+2. **cn_definition**: For `.xr-g` entries: full text of `span.xr-g` (e.g. "past tense of go"). For `.derived` entries: combined "See 见词条" text from `.de_e` and `.de_c` spans.
 3. **pos**: NULL
 4. **sense_order**: 1
 
@@ -139,8 +144,13 @@ Extraction for xref:
 | Case | Handling |
 |------|----------|
 | Empty `p-g` blocks in Oxford (no pos, no n-g) | Skip the block entirely |
+| Oxford Pattern 4: `def-g` directly under `h-g` (no `p-g`/`n-g`) | `_oxford_parse_hg_direct()` handles — POS from `top-g > block-g > pos`, grammar from `top-g > .gr`. Examples from sibling `.x-g` in `h-g` |
+| Oxford Pattern 4b: `ids-g` idioms under `h-g` | Each `id-g > sense-g` becomes a separate entry with `IDM <phrase>` POS |
+| Oxford derived-form xref (`.entry > .derived`, e.g. "abasement") | Treat as cross-reference — `cn_definition` from `.de_e`/`.de_c`, `cross_ref` from `<a>` link |
 | Oxford modal verbs (`must`) — `span.pos` outside `p-g` | Check `block-g > pos-g > pos` at entry level, not just inside `p-g` |
 | Collins `<dfn>` tags in example `<p>` | Use `.//text()` not `.text` to collect all text nodes |
+| Collins `<figure class="note type-*">` elements | Exclude from examples; extract as `extra_notes` JSON. Two formats: `<li><p>` pairs and inline `.def_cn` text |
+| Collins orphan `figure.note` outside `.collins_en_cn` (quotations) | Attach to first entry with a definition |
 | Collins level1–level5 frequency markers | Ignore |
 | Pure cross-reference entries | `pos=NULL`, `cn_definition`=description, `cross_ref`=target word |
 | Hybrid entries (xref label + own definitions, e.g. Oxford "better") | Treat as regular entries; ignore the xref label |
@@ -189,25 +199,40 @@ cd extract && /tmp/dict_venv/bin/python build_db.py
 
 # Row counts
 sqlite3 ../ecd.db "SELECT 'collins_entries', COUNT(*) FROM collins_entries"
-# → expect ~45k (reg) + ~10k (xref) combined
+# → expect ~77k
 sqlite3 ../ecd.db "SELECT 'oxford_entries', COUNT(*) FROM oxford_entries"
-# → expect ~57k
+# → expect ~88k
 
 # Xref counts
 sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE cross_ref IS NOT NULL"
-# → expect ~10,100
+# → expect ~230
 sqlite3 ../ecd.db "SELECT COUNT(*) FROM oxford_entries WHERE cross_ref IS NOT NULL"
-# → expect ~14,700
+# → expect ~3,300 (includes .derived redirects)
+
+# Extra notes
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE extra_notes IS NOT NULL"
+# → expect ~10,000
 
 # Spot-check regular entries
 sqlite3 ../ecd.db "SELECT word, pos, cn_definition FROM collins_entries WHERE word='abject'"
 sqlite3 ../ecd.db "SELECT e.word, e.pos, e.cn_definition, x.en_example, x.cn_example FROM oxford_entries e LEFT JOIN oxford_examples x ON e.id=x.entry_id WHERE e.word='beauty'"
+
+# Spot-check Pattern 4 entry (Oxford)
+sqlite3 ../ecd.db "SELECT word, pos, cn_definition FROM oxford_entries WHERE word='incantation'"
+
+# Spot-check idiom (Oxford)
+sqlite3 ../ecd.db "SELECT word, pos, cn_definition FROM oxford_entries WHERE word='aback'"
+
+# Spot-check extra_notes (Collins)
+sqlite3 ../ecd.db "SELECT word, extra_notes FROM collins_entries WHERE word='prefer'"
 
 # Spot-check cross-references
 sqlite3 ../ecd.db "SELECT word, cn_definition, cross_ref FROM oxford_entries WHERE word='went'"
 # → went | past tense of go | go
 sqlite3 ../ecd.db "SELECT word, cn_definition, cross_ref FROM collins_entries WHERE word='mice'"
 # → mice | Mice is the plural of mouse.（mouse 的复数）| mouse
+sqlite3 ../ecd.db "SELECT word, cn_definition, cross_ref FROM oxford_entries WHERE word='abasement'"
+# → abasement | See 见词条 | abase (derived-form xref)
 
 # Spot-check pronunciation
 sqlite3 ../ecd.db "SELECT word, pos, pronunciation FROM oxford_entries WHERE word='record'"
