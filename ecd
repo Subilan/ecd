@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Query the ecd dictionary database.
+
+Usage:
+  ecd <word>               Search both dictionaries for English word
+  ecd <chinese-text>        Reverse lookup: search Chinese for English entries
+  ecd -s collins <word>     Search Collins only
+  ecd -s oxford <word>      Search Oxford only
+"""
+
+import argparse
+import os
+import re
+import sqlite3
+import sys
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ecd.db")
+
+CJK_RE = re.compile(r"[一-鿿㐀-䶿豈-﫿]")
+
+
+def is_chinese_query(text):
+    return bool(CJK_RE.search(text))
+
+
+def format_entry(word, pos, cn_def, cross_ref, source_label):
+    pos_str = f" {pos}" if pos else ""
+    header = f"【{word}】{pos_str}"
+    if cross_ref:
+        header += f"  -> see: {cross_ref}"
+    lines = [f"{source_label}: {header}"]
+    if cn_def:
+        lines.append(f"  释义: {cn_def}")
+    return lines
+
+
+def search_english(db, word, source=None):
+    """Search by English word. Returns list of (source, entry, examples)."""
+    sources = [source] if source else ["collins", "oxford"]
+    results = []
+    for src in sources:
+        rows = db.execute(
+            f"""
+            SELECT e.id, e.word, e.pos, e.cn_definition, e.cross_ref, e.sense_order
+            FROM {src}_entries e
+            WHERE e.word = ? COLLATE NOCASE
+            ORDER BY e.pos, e.sense_order
+            """,
+            (word,),
+        ).fetchall()
+
+        for row in rows:
+            entry_id, w, pos, cn_def, cross_ref, sense_order = row
+            examples = db.execute(
+                f"""
+                SELECT en_example, cn_example
+                FROM {src}_examples
+                WHERE entry_id = ?
+                ORDER BY example_order
+                """,
+                (entry_id,),
+            ).fetchall()
+            results.append(
+                {
+                    "source": src,
+                    "word": w,
+                    "pos": pos,
+                    "cn_definition": cn_def,
+                    "cross_ref": cross_ref,
+                    "sense_order": sense_order,
+                    "examples": [(e[0], e[1]) for e in examples],
+                }
+            )
+    return results
+
+
+def search_chinese(db, text, source=None):
+    """Search by Chinese text using FTS5."""
+    source_filter = ""
+    if source:
+        source_filter = f"source: {source} AND"
+
+    # FTS5 requires specific syntax
+    rows = db.execute(
+        f"""
+        SELECT source, word, cn_definition, en_example
+        FROM entries_fts
+        WHERE entries_fts MATCH ?
+        ORDER BY rank
+        LIMIT 50
+        """,
+        (text,),
+    ).fetchall()
+
+    results = {}
+    for row in rows:
+        src, word, cn_def, en_example = row
+        if source and src != source:
+            continue
+        key = (src, word, cn_def or "")
+        if key not in results:
+            results[key] = []
+        if en_example:
+            results[key].append(en_example)
+
+    return results
+
+
+def print_results_english(results):
+    source_names = {"collins": "柯林斯", "oxford": "牛津"}
+
+    for r in results:
+        src_label = source_names.get(r["source"], r["source"])
+        pos_str = f" {r['pos']}" if r["pos"] else ""
+        header = f"{src_label}: 【{r['word']}】{pos_str}"
+        if r["cross_ref"]:
+            header += f"  -> see: {r['cross_ref']}"
+        print(header)
+        if r["cn_definition"]:
+            print(f"  释义: {r['cn_definition']}")
+        for en, cn in r["examples"]:
+            if en and cn:
+                print(f"  例: {en} / {cn}")
+            elif en:
+                print(f"  例: {en}")
+            elif cn:
+                print(f"  例译: {cn}")
+        print()
+
+
+def print_results_chinese(results):
+    source_names = {"collins": "柯林斯", "oxford": "牛津"}
+
+    for (src, word, cn_def), examples in results.items():
+        src_label = source_names.get(src, src)
+        print(f"{src_label}: 【{word}】 {cn_def}")
+        for ex in examples[:3]:
+            print(f"  {ex}")
+        print()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Query the ecd dictionary database"
+    )
+    parser.add_argument(
+        "-s",
+        "--source",
+        choices=["collins", "oxford"],
+        help="Search only one dictionary",
+    )
+    parser.add_argument(
+        "query",
+        nargs="+",
+        help="Word or phrase to look up",
+    )
+    args = parser.parse_args()
+
+    query = " ".join(args.query)
+
+    if not os.path.exists(DB_PATH):
+        print(f"Error: database not found at {DB_PATH}", file=sys.stderr)
+        print("Run extract/build_db.py first.", file=sys.stderr)
+        sys.exit(1)
+
+    db = sqlite3.connect(DB_PATH)
+
+    if is_chinese_query(query):
+        results = search_chinese(db, query, args.source)
+        if not results:
+            print(f"No results for: {query}")
+            sys.exit(0)
+        print_results_chinese(results)
+    else:
+        results = search_english(db, query, args.source)
+        if not results:
+            # Try Chinese search as fallback
+            results_cn = search_chinese(db, query, args.source)
+            if results_cn:
+                print_results_chinese(results_cn)
+            else:
+                print(f"No results for: {query}")
+            sys.exit(0)
+        print_results_english(results)
+
+
+if __name__ == "__main__":
+    main()
