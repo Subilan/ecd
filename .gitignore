@@ -1,0 +1,7 @@
+ecd.db
+__pycache__/
+*.pyc
+/tmp/
+extract/.venv/
+.claude/
+.DS_Store
