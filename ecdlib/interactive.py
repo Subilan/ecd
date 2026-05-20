@@ -3,6 +3,7 @@
 from .config import _auto_add, _c, _last_word, _save_history, readline
 from .db import add_flashcard, _ensure_history_db
 from .flashcards import _add_word_with_check, _delete_word_with_check, print_deck_stats, review_session
+from .lang import get_lang, set_lang, t
 from .search import handle_query, random_word, search_english
 
 
@@ -17,13 +18,13 @@ def _handle_auto_add(query):
     else:
         cfg._auto_add = not cfg._auto_add
     state = "ON" if cfg._auto_add else "OFF"
-    print(f"Auto-add: {state}")
+    print(t("interactive.auto_add", state=state))
 
 
 def interactive(db, source):
     import ecdlib.config as cfg
 
-    print(f"\033]0;ecd\007{_c('word', 'ecd')} interactive mode. Type .help for commands, .exit or Ctrl-D to quit.\n")
+    print(f"\033]0;ecd\007{_c('word', 'ecd')} {t('interactive.welcome')}\n")
     while True:
         try:
             query = input("\n> ").strip()
@@ -39,80 +40,88 @@ def interactive(db, source):
             if cmd in (".exit", ".quit", ".q"):
                 break
             elif cmd == ".help":
-                print("Commands:")
-                print("  .exit .quit .q    Exit")
-                print("  .help             Show this help")
-                print("  .add [word]       Add word to flashcard deck (or last looked-up word)")
-                print("  .del [word]       Remove word from flashcard deck (or last looked-up word)")
-                print("  .auto-add [on|off] Toggle auto-add of looked-up words to deck")
-                print("  .review           Review due flashcards")
-                print("  .deck             Show flashcard deck statistics")
-                print("  .reset            Reset all flashcard data")
-                print("  .syn [word]       Show synonyms for a word")
-                print("  .random           Show a random word")
-                print("  .ant [word]       Show antonyms for a word")
-                print("Enter any English or Chinese text to search.")
+                print(t("interactive.help_header"))
+                print(f"  .exit .quit .q    {t('interactive.help_exit')}")
+                print(f"  .help             {t('interactive.help_help')}")
+                print(f"  .add [word]       {t('interactive.help_add')}")
+                print(f"  .del [word]       {t('interactive.help_del')}")
+                print(f"  .auto-add [on|off] {t('interactive.help_auto_add')}")
+                print(f"  .review           {t('interactive.help_review')}")
+                print(f"  .deck             {t('interactive.help_deck')}")
+                print(f"  .reset            {t('interactive.help_reset')}")
+                print(f"  .syn [word]       {t('interactive.help_syn')}")
+                print(f"  .random           {t('interactive.help_random')}")
+                print(f"  .ant [word]       {t('interactive.help_ant')}")
+                print(f"  .lang [en|zh]     {t('interactive.help_lang')}")
+                print(t("interactive.search_hint"))
+                continue
+            elif cmd == ".lang" or cmd.startswith(".lang "):
+                lang_arg = query[6:].strip().lower()
+                if lang_arg in ("en", "zh"):
+                    set_lang(lang_arg)
+                    cfg._LANG = lang_arg
+                    print(t("interactive.lang_switched"))
+                else:
+                    print(f"Usage: .lang en|zh  (current: {get_lang()})")
                 continue
             elif cmd.startswith(".syn"):
                 syn_word = query[5:].strip()
                 if not syn_word:
                     syn_word = cfg._last_word
                 if not syn_word:
-                    print("Usage: .syn <word>")
+                    print(t("synonym.usage"))
                     continue
                 results = search_english(db, syn_word)
                 if not results:
-                    print(f"No entries found for '{syn_word}'.")
+                    print(t("synonym.no_entries", word=syn_word))
                     continue
                 syn_results = [(r, r.get("synonyms", [])) for r in results if r.get("synonyms")]
                 if not syn_results:
-                    print(f"No synonyms found for '{syn_word}'.")
+                    print(t("synonym.not_found", word=syn_word))
                     continue
-                source_names = {"collins": "柯林斯", "oxford": "牛津"}
-                print(f"\n找到 {len(syn_results)} 个同义词组：")
+                print(f"\n{t('synonym.found_groups', count=len(syn_results))}")
                 for r, syns in syn_results:
                     pos_str = f" {r['pos']}" if r["pos"] else ""
-                    src_label = source_names.get(r["source"], r["source"])
+                    src_label = t(f"source.{r['source']}")
                     print(f"\n{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
                     if r["cn_definition"]:
-                        print(f"  {_c('label', '释义:')} {r['cn_definition']}")
+                        print(f"  {_c('label', t('label.definition') + ':')} {r['cn_definition']}")
                     syn_text = _c('dim', ', ').join(_c('word', s) for s in syns)
-                    print(f"  {_c('label', '同义:')} {syn_text}")
+                    print(f"  {_c('label', t('label.synonym') + ':')} {syn_text}")
                 print()
                 continue
             elif cmd == ".random":
                 word = random_word(db)
                 if word:
-                    print(f"\n{_c('dim', 'Random word:')} {_c('word', word)}")
+                    print(f"\n{_c('dim', t('search.random_word'))} {_c('word', word)}")
                     handle_query(db, word, source)
                 else:
-                    print("No words found in the database.")
+                    print(t("search.no_words"))
                 continue
             elif cmd == ".ant" or cmd.startswith(".ant "):
                 ant_word = query[5:].strip()
                 if not ant_word:
                     ant_word = cfg._last_word
                 if not ant_word:
-                    print("Usage: .ant <word>")
+                    print(t("antonym.usage"))
                     continue
                 results = search_english(db, ant_word)
                 if not results:
-                    print(f"No entries found for '{ant_word}'.")
+                    print(t("synonym.no_entries", word=ant_word))
                     continue
                 ant_results = [(r, r.get("antonyms", [])) for r in results if r.get("antonyms")]
                 if not ant_results:
-                    print(f"No antonyms found for '{ant_word}'.")
+                    print(t("antonym.not_found", word=ant_word))
                     continue
-                source_names = {"collins": "柯林斯", "oxford": "牛津"}
-                print(f"\n找到 {len(ant_results)} 个反义词组：")
+                print(f"\n{t('antonym.found_groups', count=len(ant_results))}")
                 for r, ants in ant_results:
                     pos_str = f" {r['pos']}" if r["pos"] else ""
-                    src_label = source_names.get(r["source"], r["source"])
+                    src_label = t(f"source.{r['source']}")
                     print(f"\n{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
                     if r["cn_definition"]:
-                        print(f"  {_c('label', '释义:')} {r['cn_definition']}")
+                        print(f"  {_c('label', t('label.definition') + ':')} {r['cn_definition']}")
                     ant_text = _c('dim', ', ').join(_c('word', s) for s in ants)
-                    print(f"  {_c('label', '反义:')} {ant_text}")
+                    print(f"  {_c('label', t('label.antonym') + ':')} {ant_text}")
                 print()
                 continue
             elif cmd == ".add" or cmd.startswith(".add "):
@@ -120,7 +129,7 @@ def interactive(db, source):
                 if not word:
                     word = cfg._last_word
                 if not word:
-                    print("No word to add. Look up a word first, or use .add <word>.")
+                    print(t("add.no_word"))
                     continue
                 added = _add_word_with_check(db, word)
                 if added:
@@ -129,7 +138,7 @@ def interactive(db, source):
             elif cmd.startswith(".del "):
                 word = query[5:].strip()
                 if not word:
-                    print("Usage: .del <word>")
+                    print(t("del.usage"))
                     continue
                 _delete_word_with_check(word)
                 continue
@@ -144,7 +153,7 @@ def interactive(db, source):
                 continue
             elif cmd == ".reset":
                 try:
-                    answer = input("Reset all flashcard data? This cannot be undone. (y/n): ").strip().lower()
+                    answer = input(t("reset.confirm")).strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     continue
@@ -153,17 +162,17 @@ def interactive(db, source):
                     conn.execute("DELETE FROM flashcards")
                     conn.commit()
                     conn.close()
-                    print("Flashcard data reset.")
+                    print(t("reset.done"))
                 else:
-                    print("Cancelled.")
+                    print(t("reset.cancelled"))
                 continue
             else:
-                print(f"Unknown command: {query}")
+                print(t("interactive.unknown_cmd", cmd=query))
                 continue
 
         handle_query(db, query, source)
         if cfg._auto_add and cfg._last_word:
             if add_flashcard(cfg._last_word):
-                print(f"(auto-added '{cfg._last_word}' to deck)")
+                print(t("add.added", word=cfg._last_word) + " (auto)")
         if readline:
             _save_history()

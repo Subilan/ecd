@@ -35,9 +35,6 @@ DB_PATH = os.path.join(os.path.dirname(_PKG_DIR), "ecd.db")
 HISTORY_DB = os.path.expanduser("~/.ecd_lookup.db")
 HISTFILE = os.path.expanduser("~/.ecd_history")
 
-# Source label mapping used by display and interactive modules
-SOURCE_NAMES = {"collins": "柯林斯", "oxford": "牛津"}
-
 
 # --- Readline support ---
 try:
@@ -74,3 +71,8 @@ def is_chinese_query(text):
 # --- Shared mutable state ---
 _last_word = ""
 _auto_add = False
+
+# --- Language ---
+from .lang import set_lang as _set_lang, get_lang as _get_lang
+
+_LANG = _get_lang()

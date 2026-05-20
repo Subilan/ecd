@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from .config import _c
 from .db import _ensure_history_db, add_flashcard, del_flashcard
 from .display import _print_entry_body
+from .lang import t
 from .search import search_english
 from .sm2 import _sm2_schedule
 
@@ -99,7 +100,7 @@ def print_deck_stats():
     conn = _ensure_history_db()
     total = _get_card_count(conn)
     if total == 0:
-        print("Deck is empty. Use .add to add words.")
+        print(t("deck.empty"))
         conn.close()
         return
     due = _get_due_count(conn)
@@ -110,23 +111,23 @@ def print_deck_stats():
     next_str, overdue = _get_next_review_info(conn)
     conn.close()
 
-    print(f"\n{_c('label', 'Deck Statistics')}")
-    print(f"  {_c('label', 'Total:')}        {total}")
-    print(f"  {_c('label', 'Due:')}          {due}")
-    print(f"  {_c('label', 'New:')}          {newc}")
-    print(f"  {_c('label', 'Mature:')}       {mature}")
+    print(f"\n{_c('label', t('deck.stats_title'))}")
+    print(f"  {_c('label', t('deck.total') + ':')}        {total}")
+    print(f"  {_c('label', t('deck.due') + ':')}          {due}")
+    print(f"  {_c('label', t('deck.new') + ':')}          {newc}")
+    print(f"  {_c('label', t('deck.mature') + ':')}       {mature}")
 
     if next_str:
         if overdue:
             suffix = _c('warn', ' ago')
-            print(f"  {_c('label', 'Next:')}         {next_str}{suffix}")
+            print(f"  {_c('label', t('deck.next') + ':')}         {next_str}{suffix}")
         else:
-            print(f"  {_c('label', 'Next:')}         in {next_str}")
+            print(f"  {_c('label', t('deck.next') + ':')}         in {next_str}")
 
     if leeches > 0:
-        print(f"  {_c('label', 'Leeches:')}      {leeches}")
+        print(f"  {_c('label', t('deck.leeches') + ':')}      {leeches}")
 
-    print(f"  {_c('label', 'Avg ease:')}     {avg_ef:.0%}")
+    print(f"  {_c('label', t('deck.avg_ease') + ':')}     {avg_ef:.0%}")
     print()
 
 
@@ -154,16 +155,15 @@ def _get_key():
 
 def _print_flashcard_entry(entry, idx, total):
     """Print one dictionary entry for flashcard review."""
-    source_names = {"collins": "柯林斯", "oxford": "牛津"}
-    src = source_names.get(entry["source"], entry["source"])
+    src = t(f"source.{entry['source']}")
     pos_str = entry.get("pos", "") or "(none)"
-    print(f"\n  {_c('dim', f'释义 {idx + 1}/{total}  [{src}]')}")
-    print(f"  {_c('label', 'POS:')} {pos_str}")
+    print(f"\n  {_c('dim', t('review.entry_n_of', idx=idx + 1, total=total, src=src))}")
+    print(f"  {_c('label', t('label.pos') + ':')} {pos_str}")
     _print_entry_body(entry, indent="  ")
     if total > 1:
-        print(f"\n  {_c('dim', '← → 切换释义  |  0-3 评分')}")
+        print(f"\n  {_c('dim', t('review.nav_hint_multi'))}")
     else:
-        print(f"\n  {_c('dim', '0-3 评分')}")
+        print(f"\n  {_c('dim', t('review.nav_hint_single'))}")
 
 
 def review_session(db_dict):
@@ -172,14 +172,14 @@ def review_session(db_dict):
     due = _get_due_cards(conn)
 
     if not due:
-        print("No cards due for review!")
+        print(t("review.no_due"))
         total = _get_card_count(conn)
         if total > 0:
             delta_str, is_overdue = _get_next_review_info(conn)
             if is_overdue:
-                print(f"Deck has {total} cards. Next was due {delta_str} ago — run again to review.")
+                print(t("review.deck_has_overdue", total=total, due=delta_str))
             else:
-                print(f"Deck has {total} cards. Next due in {delta_str}.")
+                print(t("review.deck_has_pending", total=total, due=delta_str))
         conn.close()
         return
 
@@ -191,7 +191,7 @@ def review_session(db_dict):
         results = search_english(db_dict, word)
 
         print(f"\n{'=' * 40}")
-        print(f"Card {i}/{total_cards}")
+        print(t("review.header_card", i=i, total=total_cards))
         print(f"{'=' * 40}")
 
         # Front of card
@@ -208,9 +208,9 @@ def review_session(db_dict):
         print(f"\n  {_c('word', word)}{pron_str}")
 
         try:
-            input("\nPress Enter to reveal answer...")
+            input(f"\n{t('review.press_enter')}")
         except (EOFError, KeyboardInterrupt):
-            print("\nReview session cancelled.")
+            print(f"\n{t('review.cancelled')}")
             conn.close()
             return
 
@@ -226,7 +226,7 @@ def review_session(db_dict):
                 try:
                     key = _get_key()
                 except KeyboardInterrupt:
-                    print("\nReview session cancelled.")
+                    print(f"\n{t('review.cancelled')}")
                     conn.close()
                     return
 
@@ -242,28 +242,28 @@ def review_session(db_dict):
                     button = int(key)
                     break
         else:
-            print(f"\n  {_c('dim', '(word not found in dictionary database)')}")
+            print(f"\n  {_c('dim', t('review.word_not_found'))}")
             # Rating
             while True:
                 try:
                     inp = input(
-                        f"\n{_c('label', 'Rate:')} "
-                        f"0={_c('dim', 'Again')} "
-                        f"1={_c('dim', 'Hard')} "
-                        f"2={_c('dim', 'Good')} "
-                        f"3={_c('dim', 'Easy')}: "
+                        f"\n{_c('label', t('label.rate') + ':')} "
+                        f"0={_c('dim', t('review.again'))} "
+                        f"1={_c('dim', t('review.hard'))} "
+                        f"2={_c('dim', t('review.good'))} "
+                        f"3={_c('dim', t('review.easy'))}: "
                     ).strip()
                     if not inp:
                         continue
                     button = int(inp)
                     if button not in (0, 1, 2, 3):
-                        print("Please enter 0, 1, 2, or 3.")
+                        print(t("review.invalid_choice"))
                         continue
                     break
                 except ValueError:
-                    print("Please enter a number (0-3).")
+                    print(t("review.invalid_number"))
                 except (EOFError, KeyboardInterrupt):
-                    print("\nReview session cancelled.")
+                    print(f"\n{t('review.cancelled')}")
                     conn.close()
                     return
 
@@ -291,7 +291,7 @@ def review_session(db_dict):
         conn.commit()
 
     conn.close()
-    print(f"\n{_c('label', 'Review session complete.')} {total_cards} card(s) reviewed.")
+    print(f"\n{_c('label', t('review.complete', count=total_cards))}")
 
 
 def _add_word_with_check(db, word):
@@ -313,9 +313,9 @@ def _add_word_with_check(db, word):
         else:
             print()
     else:
-        print(f"'{word}' not found in dictionaries.")
+        print(t("add.not_found", word=word))
         try:
-            answer = input("Add anyway? (y/n): ").strip().lower()
+            answer = input(t("add.anyway")).strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return False
@@ -324,9 +324,9 @@ def _add_word_with_check(db, word):
 
     added = add_flashcard(word)
     if added:
-        print(f"Added '{word}' to flashcard deck.")
+        print(t("add.added", word=word))
     else:
-        print(f"'{word}' is already in your flashcard deck.")
+        print(t("add.already", word=word))
     return True
 
 
@@ -334,7 +334,7 @@ def _delete_word_with_check(word):
     """Delete a word from the flashcard deck. Returns True if deleted, False if not found."""
     deleted = del_flashcard(word)
     if deleted:
-        print(f"Removed '{word}' from flashcard deck.")
+        print(t("del.removed", word=word))
     else:
-        print(f"'{word}' is not in your flashcard deck.")
+        print(t("del.not_found", word=word))
     return deleted

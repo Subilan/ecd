@@ -3,27 +3,28 @@
 import json
 
 from .config import _c
+from .lang import t
 
 
 def _print_entry_body(r, indent=""):
     """Print definition, examples, synonyms, and extra_notes for one entry."""
     if r.get("cn_definition"):
-        print(f"{indent}{_c('label', '释义:')} {r['cn_definition']}")
+        print(f"{indent}{_c('label', t('label.definition') + ':')} {r['cn_definition']}")
     for en, cn in r.get("examples", []):
         if en and cn:
-            print(f"{indent}{_c('label', '例:')} {en} / {cn}")
+            print(f"{indent}{_c('label', t('label.example') + ':')} {en} / {cn}")
         elif en:
-            print(f"{indent}{_c('label', '例:')} {en}")
+            print(f"{indent}{_c('label', t('label.example') + ':')} {en}")
         elif cn:
-            print(f"{indent}{_c('label', '例译:')} {cn}")
+            print(f"{indent}{_c('label', t('label.example_cn') + ':')} {cn}")
     synonyms = r.get("synonyms", [])
     if synonyms:
         syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
-        print(f"{indent}{_c('label', '同义:')} {syn_text}")
+        print(f"{indent}{_c('label', t('label.synonym') + ':')} {syn_text}")
     antonyms = r.get("antonyms", [])
     if antonyms:
         ant_text = _c('dim', ', ').join(_c('word', s) for s in antonyms)
-        print(f"{indent}{_c('label', '反义:')} {ant_text}")
+        print(f"{indent}{_c('label', t('label.antonym') + ':')} {ant_text}")
     extra = r.get("extra_notes", "")
     if extra:
         try:
@@ -31,9 +32,9 @@ def _print_entry_body(r, indent=""):
             for note in notes:
                 note_type = note.get("type", "")
                 type_label = {
-                    "usage": "用法", "drv": "派生", "regional": "注",
-                    "sense": "释义补充", "quotation": "名言",
-                    "phrase": "短语", "note": "注",
+                    "usage": t("note.usage"), "drv": t("note.drv"), "regional": t("note.regional"),
+                    "sense": t("note.sense"), "quotation": t("note.quotation"),
+                    "phrase": t("note.phrase"), "note": t("note.general"),
                 }.get(note_type, note_type)
                 en = note.get("en", "")
                 cn = note.get("cn", "")
@@ -57,10 +58,8 @@ def _print_entry_body(r, indent=""):
 
 
 def print_results_english(results):
-    source_names = {"collins": "柯林斯", "oxford": "牛津"}
-
     for r in results:
-        src_label = source_names.get(r["source"], r["source"])
+        src_label = t(f"source.{r['source']}")
         pos_str = f" {r['pos']}" if r["pos"] else ""
         pron_str = ""
         if r.get("pronunciation"):
@@ -81,10 +80,8 @@ def print_results_english(results):
 
 
 def print_results_chinese(results):
-    source_names = {"collins": "柯林斯", "oxford": "牛津"}
-
     for (src, word, cn_def), examples in results.items():
-        src_label = source_names.get(src, src)
+        src_label = t(f"source.{src}")
         print(f"{_c('source', src_label)}: 【{_c('word', word)}】 {cn_def}")
         for ex in examples[:3]:
             print(f"  {ex}")

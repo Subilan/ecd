@@ -73,6 +73,7 @@ ecd
 | `.reset` | 清空所有卡片数据 |
 | `.syn [word]` | 查询同义词 |
 | `.ant [word]` | 查询反义词 |
+| `.lang [en\|zh]` | 切换界面语言（英文/中文） |
 | `.random` | 随机显示一个单词 |
 | `.help` | 显示帮助信息 |
 | `.exit` `.quit` `.q` Ctrl+C Ctrl+D | 退出 |

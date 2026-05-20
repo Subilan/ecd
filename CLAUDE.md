@@ -98,7 +98,7 @@ The root `ecd` file is a thin wrapper that imports from the `ecdlib/` package. T
 - **`interactive.py`**: `interactive()` REPL loop with all `.` commands
 - **`search.py`**: `search_english()`, `search_english_prefix()`, `search_english_fuzzy()`, `search_chinese()`, `random_word()`, `handle_query()` dispatch
 - **`display.py`**: `print_results_english()`, `print_results_chinese()`, `_print_entry_body()`
-- **`flashcards.py`**: `review_session()`, `print_deck_stats()`, `_add_word_with_check()`, SM-2 helpers
+- **`flashcards.py`**: `review_session()`, `print_deck_stats()`, `_add_word_with_check()`, `_get_key()`, `_print_flashcard_entry()`, SM-2 helpers. Review session supports left/right arrow keys to cycle through all dictionary entries for a word.
 - **`sm2.py`**: `_sm2_schedule()` algorithm and constants
 - **`db.py`**: `_ensure_history_db()`, `record_lookup()`, `add_flashcard()`
 - **`config.py`**: Colors, paths, CJK detection, readline setup, shared mutable state
@@ -107,7 +107,7 @@ Auto-detects Chinese (CJK range) vs. English queries. English queries use `LIKE`
 
 Displays pronunciation (parsed from JSON) inline on the word line with dimmed `/` delimiters, alongside definitions, synonyms, and antonyms from both dictionaries. Extra notes (`[用法]`, `[名言]`, `[释义补充]`, `[注]`) are displayed with the label on its own line followed by content without indentation. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
 
-When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.del [word]` to remove a word from the flashcard deck, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review, `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show synonyms from both dictionaries, `.ant [word]` to show antonyms.
+When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.del [word]` to remove a word from the flashcard deck, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review (all dictionary entries shown; ←/→ arrow keys cycle through senses, 0-3 to rate), `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show synonyms from both dictionaries, `.ant [word]` to show antonyms.
 
 ## File editing
 

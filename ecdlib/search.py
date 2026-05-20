@@ -6,6 +6,7 @@ import random
 from .config import is_chinese_query
 from .db import record_lookup
 from .display import print_results_chinese, print_results_english
+from .lang import t
 
 
 def search_english(db, word, source=None):
@@ -175,7 +176,7 @@ def handle_query(db, query, source):
     if is_chinese_query(query):
         results = search_chinese(db, query, source)
         if not results:
-            print(f"No results for: {query}")
+            print(t("search.no_results", query=query))
             return
         print_results_chinese(results)
         record_lookup(query)
@@ -198,13 +199,13 @@ def handle_query(db, query, source):
                 record_lookup(word.lower())
                 cfg._last_word = word.lower()
             else:
-                print(f"Did you mean: {', '.join(distinct_words[:10])}?")
+                print(t("search.did_you_mean", words=', '.join(distinct_words[:10])))
             return
 
         # No prefix match — try fuzzy search
         fuzzy_matches = search_english_fuzzy(db, query, source)
         if fuzzy_matches:
-            print(f"Did you mean: {', '.join(fuzzy_matches)}?")
+            print(t("search.did_you_mean", words=', '.join(fuzzy_matches)))
             return
 
         # Fall through to Chinese FTS5
@@ -214,4 +215,4 @@ def handle_query(db, query, source):
             record_lookup(query)
             cfg._last_word = query
         else:
-            print(f"No results for: {query}")
+            print(t("search.no_results", query=query))
