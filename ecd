@@ -474,6 +474,19 @@ def review_session(db_dict):
     print(f"\n{_c('label', 'Review session complete.')} {total_cards} card(s) reviewed.")
 
 
+def random_word(db, source=None):
+    """Fetch a random word entry from the database."""
+    sources = [source] if source else ["collins", "oxford"]
+    import random
+    src = random.choice(sources)
+    row = db.execute(
+        f"SELECT word FROM {src}_entries WHERE cn_definition != '' AND cross_ref IS NULL ORDER BY RANDOM() LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return row[0]
+
+
 def search_english(db, word, source=None):
     """Search by English word. Returns list of (source, entry, examples)."""
     sources = [source] if source else ["collins", "oxford"]
@@ -790,6 +803,7 @@ def interactive(db, source):
                 print("  .deck             Show flashcard deck statistics")
                 print("  .reset            Reset all flashcard data")
                 print("  .syn [word]       Show synonyms for a word")
+                print("  .random           Show a random word")
                 print("  .ant [word]       Show antonyms for a word")
                 print("Enter any English or Chinese text to search.")
                 continue
@@ -819,6 +833,14 @@ def interactive(db, source):
                     syn_text = _c('dim', ', ').join(_c('word', s) for s in syns)
                     print(f"  {_c('label', '同义:')} {syn_text}")
                 print()
+                continue
+            elif cmd == ".random":
+                word = random_word(db)
+                if word:
+                    print(f"\n{_c('dim', 'Random word:')} {_c('word', word)}")
+                    handle_query(db, word, source)
+                else:
+                    print("No words found in the database.")
                 continue
             elif cmd == ".ant" or cmd.startswith(".ant "):
                 ant_word = query[5:].strip()
@@ -907,6 +929,13 @@ def main():
         help="Search only one dictionary",
     )
     parser.add_argument(
+        "-r",
+        "--random",
+        action="store_true",
+        dest="random_word_flag",
+        help="Fetch a random word from the dictionary",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Disable ANSI color output",
@@ -929,7 +958,13 @@ def main():
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA foreign_keys = ON")
 
-    if args.query:
+    if args.random_word_flag:
+        word = random_word(db, args.source)
+        if word:
+            handle_query(db, word, args.source)
+        else:
+            print("No words found in the database.")
+    elif args.query:
         query = " ".join(args.query)
         handle_query(db, query, args.source)
     else:
