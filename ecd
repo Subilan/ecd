@@ -187,6 +187,7 @@ def _sm2_schedule(button, repetitions, interval_days, ease_factor):
 # --- Flashcard operations ---
 
 _last_word = ""
+_auto_add = False
 
 
 def add_flashcard(word):
@@ -200,6 +201,56 @@ def add_flashcard(word):
         return False
     finally:
         conn.close()
+
+
+def _add_word_with_check(db, word):
+    """Look up word in dictionary, show summary, then add to flashcards.
+    Returns True if the word was added (or already in deck), False if user declined.
+    """
+    results = search_english(db, word)
+    if results:
+        r = results[0]
+        pos_str = f" ({r['pos']})" if r.get("pos") else ""
+        cn_def = r.get("cn_definition", "")
+        print(f"{_c('word', word)}{_c('dim', pos_str)}", end="")
+        if cn_def:
+            # Keep summary brief — first definition line only
+            first_line = cn_def.split("；")[0].split("；")[0].split("。")[0]
+            if len(first_line) > 60:
+                first_line = first_line[:60] + "..."
+            print(f"  {first_line}")
+        else:
+            print()
+    else:
+        print(f"'{word}' not found in dictionaries.")
+        try:
+            answer = input("Add anyway? (y/n): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer not in ("y", "yes"):
+            return False
+
+    added = add_flashcard(word)
+    if added:
+        print(f"Added '{word}' to flashcard deck.")
+    else:
+        print(f"'{word}' is already in your flashcard deck.")
+    return True
+
+
+def _handle_auto_add(query):
+    """Handle .auto-add [on|off] command."""
+    global _auto_add
+    arg = query[10:].strip().lower()
+    if arg == "on":
+        _auto_add = True
+    elif arg == "off":
+        _auto_add = False
+    else:
+        _auto_add = not _auto_add
+    state = "ON" if _auto_add else "OFF"
+    print(f"Auto-add: {state}")
 
 
 def _get_due_cards(conn, limit=20):
@@ -314,44 +365,7 @@ def review_session(db_dict):
         if results:
             r = results[0]
             print(f"\n  {_c('label', 'POS:')} {r.get('pos', '') or '(none)'}")
-            cn_def = r.get('cn_definition', '')
-            if cn_def:
-                print(f"  {_c('label', '释义:')} {cn_def}")
-
-            for en, cn in r.get("examples", []):
-                if en and cn:
-                    print(f"  {_c('label', '例:')} {en} / {cn}")
-                elif en:
-                    print(f"  {_c('label', '例:')} {en}")
-                elif cn:
-                    print(f"  {_c('label', '例译:')} {cn}")
-
-            synonyms = r.get("synonyms", [])
-            if synonyms:
-                syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
-            print(f"  {_c('label', '同义:')} {syn_text}")
-
-            extra = r.get("extra_notes", "")
-            if extra:
-                try:
-                    notes = json.loads(extra)
-                    for note in notes:
-                        note_type = note.get("type", "")
-                        type_label = {
-                            "usage": "用法", "drv": "派生", "regional": "地域",
-                            "sense": "释义补充", "quotation": "引文",
-                            "phrase": "短语", "note": "注",
-                        }.get(note_type, note_type)
-                        en = note.get("en", "")
-                        cn = note.get("cn", "")
-                        if en and cn:
-                            print(f"  {_c('label', f'[{type_label}]')} {en} / {cn}")
-                        elif en:
-                            print(f"  {_c('label', f'[{type_label}]')} {en}")
-                        elif cn:
-                            print(f"  {_c('label', f'[{type_label}]')} {cn}")
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            _print_entry_body(r, indent="  ")
         else:
             print(f"\n  {_c('dim', '(word not found in dictionary database)')}")
 
@@ -555,6 +569,44 @@ def search_chinese(db, text, source=None):
     return results
 
 
+def _print_entry_body(r, indent=""):
+    """Print definition, examples, synonyms, and extra_notes for one entry."""
+    if r.get("cn_definition"):
+        print(f"{indent}{_c('label', '释义:')} {r['cn_definition']}")
+    for en, cn in r.get("examples", []):
+        if en and cn:
+            print(f"{indent}{_c('label', '例:')} {en} / {cn}")
+        elif en:
+            print(f"{indent}{_c('label', '例:')} {en}")
+        elif cn:
+            print(f"{indent}{_c('label', '例译:')} {cn}")
+    synonyms = r.get("synonyms", [])
+    if synonyms:
+        syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
+        print(f"{indent}{_c('label', '同义:')} {syn_text}")
+    extra = r.get("extra_notes", "")
+    if extra:
+        try:
+            notes = json.loads(extra)
+            for note in notes:
+                note_type = note.get("type", "")
+                type_label = {
+                    "usage": "用法", "drv": "派生", "regional": "地域",
+                    "sense": "释义补充", "quotation": "引文",
+                    "phrase": "短语", "note": "注",
+                }.get(note_type, note_type)
+                en = note.get("en", "")
+                cn = note.get("cn", "")
+                if en and cn:
+                    print(f"{indent}{_c('label', f'[{type_label}]')} {en} / {cn}")
+                elif en:
+                    print(f"{indent}{_c('label', f'[{type_label}]')} {en}")
+                elif cn:
+                    print(f"{indent}{_c('label', f'[{type_label}]')} {cn}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+
 def print_results_english(results):
     source_names = {"collins": "柯林斯", "oxford": "牛津"}
 
@@ -575,46 +627,7 @@ def print_results_english(results):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        if r["cn_definition"]:
-            print(f"  {_c('label', '释义:')} {r['cn_definition']}")
-        for en, cn in r["examples"]:
-            if en and cn:
-                print(f"  {_c('label', '例:')} {en} / {cn}")
-            elif en:
-                print(f"  {_c('label', '例:')} {en}")
-            elif cn:
-                print(f"  {_c('label', '例译:')} {cn}")
-        # Display synonyms
-        synonyms = r.get("synonyms", [])
-        if synonyms:
-            syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
-            print(f"  {_c('label', '同义:')} {syn_text}")
-
-        # Display extra_notes (usage notes, etc.)
-        if r.get("extra_notes"):
-            try:
-                notes = json.loads(r["extra_notes"])
-                for note in notes:
-                    note_type = note.get("type", "")
-                    type_label = {
-                        "usage": "用法",
-                        "drv": "派生",
-                        "regional": "地域",
-                        "sense": "释义补充",
-                        "quotation": "引文",
-                        "phrase": "短语",
-                        "note": "注",
-                    }.get(note_type, note_type)
-                    en = note.get("en", "")
-                    cn = note.get("cn", "")
-                    if en and cn:
-                        print(f"  {_c('label', f'[{type_label}]')} {en} / {cn}")
-                    elif en:
-                        print(f"  {_c('label', f'[{type_label}]')} {en}")
-                    elif cn:
-                        print(f"  {_c('label', f'[{type_label}]')} {cn}")
-            except (json.JSONDecodeError, TypeError):
-                pass
+        _print_entry_body(r)
         print()
 
 
@@ -678,7 +691,7 @@ def handle_query(db, query, source):
 
 
 def interactive(db, source):
-    global _last_word
+    global _last_word, _auto_add
 
     print(f"\033]0;ecd\007{_c('word', 'ecd')} interactive mode. Type .help for commands, .exit or Ctrl-D to quit.\n")
     while True:
@@ -697,12 +710,14 @@ def interactive(db, source):
                 break
             elif cmd == ".help":
                 print("Commands:")
-                print("  .exit .quit .q   Exit")
-                print("  .help            Show this help")
-                print("  .add             Add last looked-up word to flashcard deck")
-                print("  .review          Review due flashcards")
-                print("  .deck            Show flashcard deck statistics")
-                print("  .syn [word]      Show Collins synonyms for a word")
+                print("  .exit .quit .q    Exit")
+                print("  .help             Show this help")
+                print("  .add [word]       Add word to flashcard deck (or last looked-up word)")
+                print("  .auto-add [on|off] Toggle auto-add of looked-up words to deck")
+                print("  .review           Review due flashcards")
+                print("  .deck             Show flashcard deck statistics")
+                print("  .reset            Reset all flashcard data")
+                print("  .syn [word]       Show Collins synonyms for a word")
                 print("Enter any English or Chinese text to search.")
                 continue
             elif cmd.startswith(".syn"):
@@ -730,15 +745,19 @@ def interactive(db, source):
                     print(f"  {_c('label', '同义:')} {syn_text}")
                 print()
                 continue
-            elif cmd == ".add":
-                if not _last_word:
-                    print("No word to add. Look up a word first.")
+            elif cmd == ".add" or cmd.startswith(".add "):
+                word = query[5:].strip()
+                if not word:
+                    word = _last_word
+                if not word:
+                    print("No word to add. Look up a word first, or use .add <word>.")
                     continue
-                added = add_flashcard(_last_word)
+                added = _add_word_with_check(db, word)
                 if added:
-                    print(f"Added '{_last_word}' to flashcard deck.")
-                else:
-                    print(f"'{_last_word}' is already in your flashcard deck.")
+                    _last_word = word
+                continue
+            elif cmd == ".auto-add" or cmd.startswith(".auto-add "):
+                _handle_auto_add(query)
                 continue
             elif cmd == ".review":
                 review_session(db)
@@ -746,11 +765,29 @@ def interactive(db, source):
             elif cmd == ".deck":
                 print_deck_stats()
                 continue
+            elif cmd == ".reset":
+                try:
+                    answer = input("Reset all flashcard data? This cannot be undone. (y/n): ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    continue
+                if answer in ("y", "yes"):
+                    conn = _ensure_history_db()
+                    conn.execute("DELETE FROM flashcards")
+                    conn.commit()
+                    conn.close()
+                    print("Flashcard data reset.")
+                else:
+                    print("Cancelled.")
+                continue
             else:
                 print(f"Unknown command: {query}")
                 continue
 
         handle_query(db, query, source)
+        if _auto_add and _last_word:
+            if add_flashcard(_last_word):
+                print(f"(auto-added '{_last_word}' to deck)")
         if readline:
             _save_history()
 

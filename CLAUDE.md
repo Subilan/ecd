@@ -79,7 +79,7 @@ Python script that auto-detects Chinese (CJK range) vs. English queries. English
 
 Displays pronunciation (parsed from JSON) alongside definitions and Collins synonyms. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
 
-When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add` to add last word to flashcard deck, `.review` for SM-2 spaced repetition review, `.deck` for deck statistics, `.syn [word]` to show Collins synonyms.
+When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review, `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show Collins synonyms.
 
 ## File editing
 
