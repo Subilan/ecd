@@ -26,12 +26,19 @@ extract/.venv/bin/ecd-build
 # Rebuild only one dictionary
 extract/.venv/bin/python -m ecd_extract --only oxford
 
-# Run the CLI (only needs stdlib sqlite3)
-./ecd hello                 # English → both dictionaries
-python3 ecd 水              # Chinese → reverse lookup via FTS5
-python3 ecd -s oxford beauty
-./ecd                       # Interactive mode (Ctrl-D or .exit to quit)
-python3 -m ecdlib            # Same, via module
+# Run the CLI
+# Build (one time)
+make build                   # Produces ./ecd-go binary
+# CLI mode — one-shot queries
+./ecd-go hello               # English → both dictionaries
+./ecd-go 水                   # Chinese → reverse lookup via FTS5
+./ecd-go -s oxford beauty    # Source filter
+./ecd-go -r                   # Random word
+./ecd-go --no-color hello     # Plain text (no ANSI)
+echo hello | ./ecd-go         # Piped input
+# TUI mode — interactive interface
+./ecd-go                      # Bubble Tea TUI (no args + TTY)
+cd cli && go run .            # Dev: run from source
 ```
 
 The `extract/.venv/` and `ecd.db` (~80 MB) are git-ignored.
@@ -91,23 +98,45 @@ Xref detection in Oxford: `.sense-g .xr-g` present, no `.p-g`, no `.n-g`; OR `.e
 
 **Entry filtering**: Both Oxford and Collins parsers skip entries that have no `cn_definition` and no examples — these are noise (thesaurus headings, "See also:" links, abbreviation expansions without Chinese translation). Entries with examples but no Chinese definition are kept (English-only definitions with example sentences still have value).
 
-### CLI (`ecd` + `ecdlib/`)
+### Go CLI (`cli/`)
 
-The root `ecd` file is a thin wrapper that imports from the `ecdlib/` package. The package is modular:
-- **`cli.py`**: `main()` — argument parsing, DB connection, dispatch to interactive/query/random
-- **`interactive.py`**: `interactive()` REPL loop with all `.` commands
-- **`search.py`**: `search_english()`, `search_english_prefix()`, `search_english_fuzzy()`, `search_chinese()`, `random_word()`, `handle_query()` dispatch
-- **`display.py`**: `print_results_english()`, `print_results_chinese()`, `_print_entry_body()`
-- **`flashcards.py`**: `review_session()`, `print_deck_stats()`, `_add_word_with_check()`, `_get_key()`, `_print_flashcard_entry()`, SM-2 helpers. Review session supports left/right arrow keys to cycle through all dictionary entries for a word.
-- **`sm2.py`**: `_sm2_schedule()` algorithm and constants
-- **`db.py`**: `_ensure_history_db()`, `record_lookup()`, `add_flashcard()`
-- **`config.py`**: Colors, paths, CJK detection, readline setup, shared mutable state
+Go CLI using Bubble Tea for TUI. Single binary, zero runtime dependencies (pure Go SQLite via `modernc.org/sqlite`).
 
-Auto-detects Chinese (CJK range) vs. English queries. English queries use `LIKE` with `COLLATE NOCASE`; Chinese queries use FTS5 MATCH. Falls back to Chinese search if English search finds nothing.
+- **`cli/main.go`**: Entry point — flag parsing, dispatch to CLI or TUI mode
+- **`cli/internal/config/`**: DB paths (`../ecd.db`), CJK detection regex, SQLite driver init
+- **`cli/internal/i18n/`**: String tables (zh/en), `T()` helper with `%s`/`%d` placeholders
+- **`cli/internal/sm2/`**: SM-2 scheduling algorithm (pure math, ported from sm2.py)
+- **`cli/internal/dict/`**: `models.go` (Entry, Example, Note, ChineseResult structs), `db.go` (DB connection, 4-tier search queries, FTS5)
+- **`cli/internal/history/`**: History DB (`~/.ecd_lookup.db`) CRUD, flashcard operations, deck stats
+- **`cli/internal/search/`**: Search dispatch (exact → prefix → fuzzy → FTS5), synonym/antonym lookup
+- **`cli/internal/cli/`**: CLI output with ANSI colors, auto-disabled on pipe/`--no-color`
+- **`cli/internal/tui/`**: Bubble Tea TUI (`model.go` state machine + sub-models)
 
-Displays pronunciation (parsed from JSON) inline on the word line with dimmed `/` delimiters, alongside definitions, synonyms, and antonyms from both dictionaries. Extra notes (`[用法]`, `[名言]`, `[释义补充]`, `[注]`) are displayed with the label on its own line followed by content without indentation. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
+**Search strategy**: 4-tier dispatch — exact match → prefix match → fuzzy match → FTS5 Chinese fallback. CJK detection via `\p{Han}` regex. English queries use `COLLATE NOCASE`; Chinese uses FTS5 MATCH with `unicode61` tokenizer.
 
-When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.del [word]` to remove a word from the flashcard deck, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review (all dictionary entries shown; ←/→ arrow keys cycle through senses, 0-3 to rate), `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show synonyms from both dictionaries, `.ant [word]` to show antonyms.
+**TUI commands** (typed in search bar, Enter to execute):
+
+| Command | Action |
+|---------|--------|
+| (any text) | Search word |
+| `/help` | Show help |
+| `/add [word]` | Add to flashcard deck |
+| `/del <word>` | Remove from deck |
+| `/auto-add [on\|off]` | Toggle auto-add |
+| `/review` | Start SM-2 review (← → cycle senses, 0-3 rate) |
+| `/deck` | Deck statistics |
+| `/reset` | Reset all cards (confirm with `/reset-confirm`) |
+| `/syn [word]` | Show synonyms |
+| `/ant [word]` | Show antonyms |
+| `/random` | Random word |
+| `/lang [en\|zh]` | Switch UI language |
+| `/exit` `/quit` `/q` | Quit |
+
+**CLI mode**: When args are provided or stdin is piped, runs one-shot queries and exits. Respects `--no-color` and TTY detection. Same 4-tier search as TUI.
+
+**Data flow**: `ecd.db` (read-only, ~80MB) holds dictionary data. `~/.ecd_lookup.db` (read-write) holds lookup history and SM-2 flashcard state. Both are SQLite, shared with the deprecated Python CLI.
+
+The old Python CLI (`ecdlib/`, `ecd`) is archived in `cli_deprecated/`.
 
 ## File editing
 
