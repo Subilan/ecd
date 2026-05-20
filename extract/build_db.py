@@ -364,7 +364,7 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ], [[]]
+        ], [[]], [[]]
 
     # Derived-form xref: .derived with a link to parent word
     derived = tree.cssselect(".entry > .derived")
@@ -390,9 +390,9 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ], [[]]
+        ], [[]], [[]]
 
-    return [], [[]]
+    return [], [[]], [[]]
 
 
 def _oxford_pos_for_ng(n_g, base_pos_spans):
@@ -495,6 +495,8 @@ def _oxford_parse_hg_direct(h_g, word, base_pos_spans, top_g):
     wrappers), and entries with .ids-g / .xr-g siblings.
     """
     entries = []
+    entry_synonyms = []
+    entry_antonyms = []
     pron = _extract_oxford_pronunciation(h_g, top_g)
 
     # Pattern 4a: direct def-g under h-g
@@ -545,6 +547,10 @@ def _oxford_parse_hg_direct(h_g, word, base_pos_spans, top_g):
                 "extra_notes": None,
             }
         )
+        # Extract xrefs from h_g for this entry (shared across 4a entries)
+        syns, ants = _extract_oxford_xrefs(h_g)
+        entry_synonyms.append(syns)
+        entry_antonyms.append(ants)
 
     # Pattern 4b: ids-g (idioms) — each id-g becomes a separate entry
     ids_g = h_g.cssselect(".ids-g")
@@ -591,15 +597,44 @@ def _oxford_parse_hg_direct(h_g, word, base_pos_spans, top_g):
                     "extra_notes": None,
                 }
             )
+            # Extract xrefs from sense_g for this idiom entry
+            syns, ants = _extract_oxford_xrefs(sense_g)
+            entry_synonyms.append(syns)
+            entry_antonyms.append(ants)
 
-    return entries
+    return entries, entry_synonyms, entry_antonyms
+
+
+def _extract_oxford_xrefs(container_el):
+    """Extract synonym and antonym cross-references from Oxford .xr-g elements."""
+    synonyms = []
+    antonyms = []
+    for xr_g in container_el.cssselect(".xr-g"):
+        opp = xr_g.cssselect(".symbols-oppsym")
+        if opp:
+            xr = xr_g.cssselect(".xr .xh a")
+            if xr:
+                w = xr[0].text_content().strip()
+                if w:
+                    antonyms.append(w)
+            continue
+        z_xr = xr_g.cssselect(".z_xr")
+        if z_xr and "synonym" in z_xr[0].text_content().lower():
+            xr = xr_g.cssselect(".xr .xh a")
+            if xr:
+                w = xr[0].text_content().strip()
+                if w:
+                    synonyms.append(w)
+    return synonyms, antonyms
 
 
 def parse_oxford_regular(tree, word):
     entries = []
+    entry_synonyms = []
+    entry_antonyms = []
     entry_el = tree.cssselect(".entry")
     if not entry_el:
-        return [], [[]]
+        return [], [[]], [[]]
     entry_el = entry_el[0]
 
     top_gs = entry_el.cssselect(".top-g")
@@ -638,16 +673,24 @@ def parse_oxford_regular(tree, word):
                             "extra_notes": None,
                         }
                     )
+                    syns, ants = _extract_oxford_xrefs(n_g)
+                    entry_synonyms.append(syns)
+                    entry_antonyms.append(ants)
             else:
                 # No .n-g — def-g and x-g are direct children of p-g
                 # (e.g. "cause" verb, "abandon" noun, "above" adj)
-                entries += _oxford_parse_pg_direct(p_g, word, pos_spans, top_g)
+                pg_entries = _oxford_parse_pg_direct(p_g, word, pos_spans, top_g)
+                entries += pg_entries
+                syns, ants = _extract_oxford_xrefs(p_g)
+                for _ in pg_entries:
+                    entry_synonyms.append(syns)
+                    entry_antonyms.append(ants)
     else:
         # Pattern 2: n-g directly in h-g, POS from top-g > block-g (e.g. "beauty")
         pos_spans = tree.cssselect(".top-g .block-g .pos")
         h_g = tree.cssselect(".h-g")
         if not h_g:
-            return [], [[]]
+            return [], [[]], [[]]
         h_g = h_g[0]
 
         pron = _extract_oxford_pronunciation(top_g) if top_g is not None else None
@@ -674,14 +717,25 @@ def parse_oxford_regular(tree, word):
                         "extra_notes": None,
                     }
                 )
+                syns, ants = _extract_oxford_xrefs(n_g)
+                entry_synonyms.append(syns)
+                entry_antonyms.append(ants)
         else:
             # Pattern 4: No .n-g — def-g / ids-g / x-g are direct children of h-g
-            entries += _oxford_parse_hg_direct(h_g, word, pos_spans, top_g)
+            hg_entries, hg_syns, hg_ants = _oxford_parse_hg_direct(h_g, word, pos_spans, top_g)
+            entries += hg_entries
+            entry_synonyms += hg_syns
+            entry_antonyms += hg_ants
 
     # Filter out entries with no definition and no examples
     # (e.g. abbreviation expansions with no Chinese translation)
     filtered = [e for e in entries if e["cn_definition"] or e["examples"]]
-    return filtered, [[] for _ in filtered]
+
+    # Filter synonym/antonym lists to match filtered entries
+    filtered_syns = [s for e, s in zip(entries, entry_synonyms) if e["cn_definition"] or e["examples"]]
+    filtered_ants = [a for e, a in zip(entries, entry_antonyms) if e["cn_definition"] or e["examples"]]
+
+    return filtered, filtered_syns, filtered_ants
 
 
 def is_oxford_xref(tree):
@@ -722,10 +776,11 @@ def is_collins_xref(tree):
 
 
 def parse_tabfile(filepath, source):
-    """Parse a tabfile, return (entry_rows, example_batches, synonym_batches)."""
+    """Parse a tabfile, return (entry_rows, example_batches, synonym_batches, antonym_batches)."""
     entry_rows = []
     example_batches = []
     synonym_batches = []
+    antonym_batches = []
 
     with open(filepath, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -755,15 +810,16 @@ def parse_tabfile(filepath, source):
                     entries, entry_synonyms = parse_collins_xref(tree, word)
                 else:
                     entries, entry_synonyms = parse_collins_regular(tree, word)
+                entry_antonyms = [[] for _ in entries]
                 # Apply word-level pronunciation to all Collins entries
                 pron = _extract_collins_pronunciation(tree)
                 for e in entries:
                     e["pronunciation"] = pron
             else:
                 if is_oxford_xref(tree):
-                    entries, entry_synonyms = parse_oxford_xref(tree, word)
+                    entries, entry_synonyms, entry_antonyms = parse_oxford_xref(tree, word)
                 else:
-                    entries, entry_synonyms = parse_oxford_regular(tree, word)
+                    entries, entry_synonyms, entry_antonyms = parse_oxford_regular(tree, word)
 
             for entry in entries:
                 entry_rows.append(
@@ -784,8 +840,9 @@ def parse_tabfile(filepath, source):
                     ]
                 )
                 synonym_batches.append(entry_synonyms.pop(0) if entry_synonyms else [])
+                antonym_batches.append(entry_antonyms.pop(0) if entry_antonyms else [])
 
-    return entry_rows, example_batches, synonym_batches
+    return entry_rows, example_batches, synonym_batches, antonym_batches
 
 
 def build_db(db_path, dicts_to_process, dict_paths):
@@ -809,7 +866,7 @@ def build_db(db_path, dicts_to_process, dict_paths):
             extract_tabfile(dict_path, tabfile)
 
             print(f"Parsing {source} entries...", file=sys.stderr)
-            entry_rows, example_batches, synonym_batches = parse_tabfile(tabfile, source)
+            entry_rows, example_batches, synonym_batches, antonym_batches = parse_tabfile(tabfile, source)
 
             table = f"{source}_entries"
             print(
@@ -854,23 +911,39 @@ def build_db(db_path, dicts_to_process, dict_paths):
             )
             conn.commit()
 
-            # Insert synonyms for Collins entries
-            if source == "collins":
-                synonym_rows = []
-                for entry_id, synonyms in zip(entry_ids, synonym_batches):
-                    for syn_word in synonyms:
-                        synonym_rows.append((entry_id, syn_word))
-                if synonym_rows:
-                    conn.execute("BEGIN")
-                    conn.executemany(
-                        "INSERT INTO synonyms (entry_id, synonym_word) VALUES (?, ?)",
-                        synonym_rows,
-                    )
-                    conn.commit()
-                    print(
-                        f"Inserting {len(synonym_rows)} synonyms...",
-                        file=sys.stderr,
-                    )
+            # Insert synonyms (both dictionaries)
+            synonym_rows = []
+            for entry_id, synonyms in zip(entry_ids, synonym_batches):
+                for syn_word in synonyms:
+                    synonym_rows.append((source, entry_id, syn_word))
+            if synonym_rows:
+                conn.execute("BEGIN")
+                conn.executemany(
+                    "INSERT INTO synonyms (source, entry_id, synonym_word) VALUES (?, ?, ?)",
+                    synonym_rows,
+                )
+                conn.commit()
+                print(
+                    f"Inserting {len(synonym_rows)} synonyms...",
+                    file=sys.stderr,
+                )
+
+            # Insert antonyms (both dictionaries)
+            antonym_rows = []
+            for entry_id, antonyms in zip(entry_ids, antonym_batches):
+                for ant_word in antonyms:
+                    antonym_rows.append((source, entry_id, ant_word))
+            if antonym_rows:
+                conn.execute("BEGIN")
+                conn.executemany(
+                    "INSERT INTO antonyms (source, entry_id, antonym_word) VALUES (?, ?, ?)",
+                    antonym_rows,
+                )
+                conn.commit()
+                print(
+                    f"Inserting {len(antonym_rows)} antonyms...",
+                    file=sys.stderr,
+                )
 
     # Populate FTS5
     print("Populating FTS5 index...", file=sys.stderr)

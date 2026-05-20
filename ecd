@@ -343,16 +343,17 @@ def review_session(db_dict):
         print(f"{'=' * 40}")
 
         # Front of card
-        print(f"\n  {_c('word', word)}")
+        pron_str = ""
         if results:
             pron = results[0].get("pronunciation", "")
             if pron:
                 try:
                     ipas = json.loads(pron)
                     if ipas:
-                        print(f"  {_c('pron', ' | '.join(ipas))}")
+                        pron_str = f"{_c('dim', ' /')}{_c('pron', ' | '.join(ipas))}{_c('dim', '/')}"
                 except (json.JSONDecodeError, TypeError):
                     pass
+        print(f"\n  {_c('word', word)}{pron_str}")
 
         try:
             input("\nPress Enter to reveal answer...")
@@ -459,14 +460,16 @@ def search_english(db, word, source=None):
                 "examples": [(e[0], e[1]) for e in examples],
             }
             # Fetch synonyms for Collins entries
-            if src == "collins":
-                syn_rows = db.execute(
-                    "SELECT synonym_word FROM synonyms WHERE entry_id = ? ORDER BY id",
-                    (entry_id,),
-                ).fetchall()
-                result["synonyms"] = [r[0] for r in syn_rows]
-            else:
-                result["synonyms"] = []
+            syn_rows = db.execute(
+                "SELECT synonym_word FROM synonyms WHERE source=? AND entry_id=? ORDER BY id",
+                (src, entry_id),
+            ).fetchall()
+            result["synonyms"] = [r[0] for r in syn_rows]
+            ant_rows = db.execute(
+                "SELECT antonym_word FROM antonyms WHERE source=? AND entry_id=? ORDER BY id",
+                (src, entry_id),
+            ).fetchall()
+            result["antonyms"] = [r[0] for r in ant_rows]
             results.append(result)
     return results
 
@@ -509,14 +512,16 @@ def search_english_prefix(db, word, source=None):
                 "extra_notes": extra_notes,
                 "examples": [(e[0], e[1]) for e in examples],
             }
-            if src == "collins":
-                syn_rows = db.execute(
-                    "SELECT synonym_word FROM synonyms WHERE entry_id = ? ORDER BY id",
-                    (entry_id,),
-                ).fetchall()
-                result["synonyms"] = [r[0] for r in syn_rows]
-            else:
-                result["synonyms"] = []
+            syn_rows = db.execute(
+                "SELECT synonym_word FROM synonyms WHERE source=? AND entry_id=? ORDER BY id",
+                (src, entry_id),
+            ).fetchall()
+            result["synonyms"] = [r[0] for r in syn_rows]
+            ant_rows = db.execute(
+                "SELECT antonym_word FROM antonyms WHERE source=? AND entry_id=? ORDER BY id",
+                (src, entry_id),
+            ).fetchall()
+            result["antonyms"] = [r[0] for r in ant_rows]
             results.append(result)
     return results
 
@@ -584,6 +589,10 @@ def _print_entry_body(r, indent=""):
     if synonyms:
         syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
         print(f"{indent}{_c('label', '同义:')} {syn_text}")
+    antonyms = r.get("antonyms", [])
+    if antonyms:
+        ant_text = _c('dim', ', ').join(_c('word', s) for s in antonyms)
+        print(f"{indent}{_c('label', '反义:')} {ant_text}")
     extra = r.get("extra_notes", "")
     if extra:
         try:
@@ -613,21 +622,21 @@ def print_results_english(results):
     for r in results:
         src_label = source_names.get(r["source"], r["source"])
         pos_str = f" {r['pos']}" if r["pos"] else ""
-        header = f"{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}"
-        if r["cross_ref"]:
-            header += f"  -> see: {r['cross_ref']}"
-        print(header)
-
-        # Display pronunciation
+        pron_str = ""
         if r.get("pronunciation"):
             try:
                 ipas = json.loads(r["pronunciation"])
                 if ipas:
-                    print(f"  {_c('label', '发音:')} {_c('pron', ' | '.join(ipas))}")
+                    pron_str = f"{_c('dim', ' /')}{_c('pron', ' | '.join(ipas))}{_c('dim', '/')}"
             except (json.JSONDecodeError, TypeError):
                 pass
+        header = f"{_c('source', src_label)}: 【{_c('word', r['word'])}】{pron_str}{_c('dim', pos_str)}"
+        if r["cross_ref"]:
+            header += f"  -> see: {r['cross_ref']}"
+        print(header)
 
         _print_entry_body(r)
+        print()
         print()
 
 
@@ -717,7 +726,8 @@ def interactive(db, source):
                 print("  .review           Review due flashcards")
                 print("  .deck             Show flashcard deck statistics")
                 print("  .reset            Reset all flashcard data")
-                print("  .syn [word]       Show Collins synonyms for a word")
+                print("  .syn [word]       Show synonyms for a word")
+                print("  .ant [word]       Show antonyms for a word")
                 print("Enter any English or Chinese text to search.")
                 continue
             elif cmd.startswith(".syn"):
@@ -727,22 +737,51 @@ def interactive(db, source):
                 if not syn_word:
                     print("Usage: .syn <word>")
                     continue
-                results = search_english(db, syn_word, source="collins")
+                results = search_english(db, syn_word)
                 if not results:
-                    print(f"No Collins entries found for '{syn_word}'.")
+                    print(f"No entries found for '{syn_word}'.")
                     continue
                 syn_results = [(r, r.get("synonyms", [])) for r in results if r.get("synonyms")]
                 if not syn_results:
                     print(f"No synonyms found for '{syn_word}'.")
                     continue
+                source_names = {"collins": "柯林斯", "oxford": "牛津"}
                 print(f"\n找到 {len(syn_results)} 个同义词组：")
                 for r, syns in syn_results:
                     pos_str = f" {r['pos']}" if r["pos"] else ""
-                    print(f"\n{_c('source', '柯林斯')}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
+                    src_label = source_names.get(r["source"], r["source"])
+                    print(f"\n{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
                     if r["cn_definition"]:
                         print(f"  {_c('label', '释义:')} {r['cn_definition']}")
                     syn_text = _c('dim', ', ').join(_c('word', s) for s in syns)
                     print(f"  {_c('label', '同义:')} {syn_text}")
+                print()
+                continue
+            elif cmd == ".ant" or cmd.startswith(".ant "):
+                ant_word = query[5:].strip()
+                if not ant_word:
+                    ant_word = _last_word
+                if not ant_word:
+                    print("Usage: .ant <word>")
+                    continue
+                results = search_english(db, ant_word)
+                if not results:
+                    print(f"No entries found for '{ant_word}'.")
+                    continue
+                ant_results = [(r, r.get("antonyms", [])) for r in results if r.get("antonyms")]
+                if not ant_results:
+                    print(f"No antonyms found for '{ant_word}'.")
+                    continue
+                source_names = {"collins": "柯林斯", "oxford": "牛津"}
+                print(f"\n找到 {len(ant_results)} 个反义词组：")
+                for r, ants in ant_results:
+                    pos_str = f" {r['pos']}" if r["pos"] else ""
+                    src_label = source_names.get(r["source"], r["source"])
+                    print(f"\n{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
+                    if r["cn_definition"]:
+                        print(f"  {_c('label', '释义:')} {r['cn_definition']}")
+                    ant_text = _c('dim', ', ').join(_c('word', s) for s in ants)
+                    print(f"  {_c('label', '反义:')} {ant_text}")
                 print()
                 continue
             elif cmd == ".add" or cmd.startswith(".add "):

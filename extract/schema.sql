@@ -64,12 +64,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     tokenize='unicode61'
 );
 
--- Synonyms from Collins entries
+-- Synonyms from both dictionaries
 CREATE TABLE IF NOT EXISTS synonyms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_id INTEGER NOT NULL REFERENCES collins_entries(id) ON DELETE CASCADE,
+    source TEXT NOT NULL CHECK(source IN ('collins', 'oxford')),
+    entry_id INTEGER NOT NULL,
     synonym_word TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_synonyms_entry ON synonyms(entry_id);
+CREATE INDEX IF NOT EXISTS idx_synonyms_entry ON synonyms(source, entry_id);
 CREATE INDEX IF NOT EXISTS idx_synonyms_word ON synonyms(synonym_word);
+
+-- Antonyms (primarily from Oxford OPP markers)
+CREATE TABLE IF NOT EXISTS antonyms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('collins', 'oxford')),
+    entry_id INTEGER NOT NULL,
+    antonym_word TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_antonyms_entry ON antonyms(source, entry_id);
+CREATE INDEX IF NOT EXISTS idx_antonyms_word ON antonyms(antonym_word);

@@ -71,17 +71,35 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
 );
 ```
 
-### Synonyms Table (Collins only)
+### Synonyms Table
 
 ```sql
 CREATE TABLE IF NOT EXISTS synonyms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_id INTEGER NOT NULL REFERENCES collins_entries(id) ON DELETE CASCADE,
+    source TEXT NOT NULL CHECK(source IN ('collins', 'oxford')),
+    entry_id INTEGER NOT NULL,
     synonym_word TEXT NOT NULL
 );
-CREATE INDEX idx_synonyms_entry ON synonyms(entry_id);
+CREATE INDEX idx_synonyms_entry ON synonyms(source, entry_id);
 CREATE INDEX idx_synonyms_word ON synonyms(synonym_word);
 ```
+
+Collins: extracted from `<div class="synonym">` blocks. Oxford: extracted from `.xr-g` elements containing `.z_xr "synonyms at"` cross-references.
+
+### Antonyms Table
+
+```sql
+CREATE TABLE IF NOT EXISTS antonyms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('collins', 'oxford')),
+    entry_id INTEGER NOT NULL,
+    antonym_word TEXT NOT NULL
+);
+CREATE INDEX idx_antonyms_entry ON antonyms(source, entry_id);
+CREATE INDEX idx_antonyms_word ON antonyms(antonym_word);
+```
+
+Primarily from Oxford `.xr-g` elements containing `.symbols-oppsym` (OPP) markers.
 
 ### Why Separate Tables Per Dictionary
 
@@ -106,7 +124,15 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words. **Exclude `<li>` inside `<figure class="note">` elements** — those are extra_notes, not examples.
 5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`, **excluding `type-drv`**. Two formats: (a) `<li><p>en</p><p>cn</p></li>` inside figure (usage/sense notes), (b) inline text with `.def_cn` spans (regional notes like "in AM, use…"). Orphan figures outside `.collins_en_cn` (e.g. quotation notes) are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
 6. **Derived forms**: `<figure class="note type-drv">` elements are handled by `_extract_drv_entries()` → standalone entries with `pos='DRV'`, word from `<b>` tag, examples from `<li><p>` pairs. Same-pronunciation as parent entry.
-7. **Synonyms**: `<div class="synonym">` blocks → `_extract_collins_synonyms()` extracts each `<span class="form">` (link text or plain text). Returned alongside entries for insertion into `synonyms` table.
+7. **Synonyms**: `<div class="synonym">` blocks → `_extract_collins_synonyms()` extracts each `<span class="form">` (link text or plain text). Stored in `synonyms` table with `source='collins'`.
+
+#### Oxford synonym & antonym extraction
+
+`.xr-g` cross-reference elements are parsed by `_extract_oxford_xrefs()` per entry container (`n-g`, `p-g`, `h-g`, `sense-g`):
+- `.symbols-oppsym` (OPP) markers → antonyms
+- `.z_xr` elements containing "synonyms at" → synonym cross-references
+
+Stored in `synonyms` and `antonyms` tables with `source='oxford'`, one entry per sense (not duplicated across senses).
 6. **sense_order**: Enumerate `collins_en_cn` divs within a (word, pos) group
 7. **pronunciation**: `_extract_collins_pronunciation()` — `span.pron` at `word_entry` level → `span.pron.type_uk` and `span.pron.type_us`. IPA text has HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`. Stored as JSON array.
 
@@ -203,11 +229,11 @@ Python script in project root:
 - `ecd -s collins <word>` / `ecd -s oxford <word>` — single dictionary
 - `ecd <chinese>` — FTS5 reverse lookup
 - For xref entries: display "→ see `<cross_ref>`" and optionally follow the ref
-- **Pronunciation display**: Parsed from JSON array, displayed as `发音: /IPA1/ | /IPA2/` (purple color)
-- **Synonym display**: Collins entries show `同义: synonym1, synonym2, ...` (yellow color, dim commas)
+- **Pronunciation display**: Parsed from JSON array, displayed inline on the word line as ` /IPA1 | IPA2/` (purple IPA, dimmed `/` delimiters).
+- **Synonym/Antonym display**: Entries show `同义: synonym1, ...` and `反义: antonym1, ...` (dim commas).
 - **Lookup history**: Stored in `~/.ecd_lookup.db` (separate from stateless `ecd.db`). `record_lookup()` upserts the queried word with count + timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions and empty results are not recorded. History survives `ecd.db` rebuilds.
-- **Interactive mode**: Sets terminal title to "ecd". Commands: `.add` (add last word to flashcard deck), `.review` (SM-2 spaced repetition review with Again/Hard/Good/Easy rating), `.deck` (deck statistics), `.syn [word]` (show Collins synonyms, omits entries without synonyms), `.exit`/`.quit`/`.q` to exit.
-- **Flashcard deck**: SM-2 algorithm with ease factor, interval days, repetition count. Cards stored in `~/.ecd_lookup.db` `flashcards` table.
+- **Interactive mode**: Sets terminal title to "ecd". Commands: `.add [word]` (add word to flashcard deck with dictionary lookup preview), `.auto-add [on|off]` (toggle auto-adding looked-up words), `.review` (SM-2 spaced repetition review with Again/Hard/Good/Easy rating), `.deck` (deck statistics), `.reset` (clear all flashcard data), `.syn [word]` (show synonyms from both dictionaries), `.ant [word]` (show antonyms), `.exit`/`.quit`/`.q` to exit.
+- **Flashcard deck**: SM-2 algorithm with ease factor, interval days, repetition count. Cards stored in `~/.ecd_lookup.db` `flashcards` table. Flashcard data is independent of dictionary data — only stores word + SM-2 metadata, looks up `ecd.db` for display during review.
 
 ## Verification
 
@@ -231,9 +257,13 @@ sqlite3 ../ecd.db "SELECT COUNT(*) FROM oxford_entries WHERE cross_ref IS NOT NU
 sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE pos = 'DRV'"
 # → expect ~3,500
 
-# Synonyms
-sqlite3 ../ecd.db "SELECT COUNT(*) FROM synonyms"
-# → expect ~85k
+# Synonyms (both dictionaries)
+sqlite3 ../ecd.db "SELECT source, COUNT(*) FROM synonyms GROUP BY source"
+# → expect collins ~85k, oxford ~800
+
+# Antonyms
+sqlite3 ../ecd.db "SELECT source, COUNT(*) FROM antonyms GROUP BY source"
+# → expect oxford ~1,500
 
 # Extra notes
 sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE extra_notes IS NOT NULL"

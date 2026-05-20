@@ -38,7 +38,8 @@ Each dictionary has two tables with identical column layouts — separate tables
 - **`{dict}_entries`** — one row per word sense. Columns: `word`, `pos` (e.g. `N-COUNT`, `noun [U]`), `cn_definition`, `cross_ref` (for pure redirects like "went" → "go"), `sense_order`, `pronunciation` (JSON array of IPA strings, e.g. `["həˈləʊ","həˈloʊ"]`), `extra_notes` (JSON array of `{"type":"...","en":"...","cn":"..."}` for usage notes, regional variants, derived forms, quotations from `<figure class="note">` elements). Unique on `(word, pos, sense_order)`.
 - **`{dict}_examples`** — 1:N from entries. Columns: `entry_id` FK, `en_example`, `cn_example`, `example_order`.
 - **`entries_fts`** — shared FTS5 virtual table (`unicode61` tokenizer) for Chinese reverse lookup. Columns: `source`, `word`, `cn_definition`, `en_example`, `cn_example`. Populated from both dictionaries' non-xref entries joined with examples.
-- **`synonyms`** — Collins synonym relationships. Columns: `entry_id` FK → `collins_entries(id) ON DELETE CASCADE`, `synonym_word`. Extracted from `<div class="synonym">` blocks in Collins HTML.
+- **`synonyms`** — synonym relationships from both dictionaries. Columns: `source` (`collins`/`oxford`), `entry_id`, `synonym_word`. Collins: extracted from `<div class="synonym">` blocks. Oxford: extracted from `.xr-g` elements containing `.z_xr "synonyms at"` cross-references.
+- **`antonyms`** — antonym relationships from both dictionaries. Same schema as `synonyms` with `antonym_word`. Primarily from Oxford `.xr-g` elements containing `.symbols-oppsym` (OPP) markers.
 
 Cross-reference entries (e.g. "went" = past tense of "go", "mice" = plural of "mouse") have `pos=''` and a non-null `cross_ref` pointing to the canonical word. They are excluded from FTS5.
 
@@ -57,7 +58,9 @@ Cross-reference entries (e.g. "went" = past tense of "go", "mice" = plural of "m
 
 **Collins derived forms**: `<figure class="note type-drv">` elements are NOT treated as extra_notes. Instead, `_extract_drv_entries()` creates standalone entries with `pos='DRV'`, the derived word from `<b>` tag, and examples from `<li><p>` pairs. Duplicates are deduplicated within the same parent entry by `seen_drv_words` set; cross-parent duplicates use `INSERT OR IGNORE` with fallback ID lookup.
 
-**Collins synonyms**: `<div class="synonym">` blocks containing `<span class="form">` elements (both `<a>` links and plain text) are extracted by `_extract_collins_synonyms()` and returned alongside entries. Stored in the `synonyms` table keyed to `collins_entries.id`.
+**Collins synonyms**: `<div class="synonym">` blocks containing `<span class="form">` elements (both `<a>` links and plain text) are extracted by `_extract_collins_synonyms()` and stored in the `synonyms` table.
+
+**Oxford synonyms/antonyms**: `.xr-g` cross-reference elements are parsed by `_extract_oxford_xrefs()`. `.symbols-oppsym` (OPP) markers yield antonyms; `.z_xr` elements containing "synonyms at" yield synonym cross-references. Stored in the `synonyms` and `antonyms` tables.
 
 **Collins pronunciation**: `span.pron` at `word_entry` level (one set per word, shared by all senses). Extracted from `span.pron.type_uk` and `span.pron.type_us`. IPA text contains HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`.
 
@@ -77,9 +80,9 @@ Xref detection in Oxford: `.sense-g .xr-g` present, no `.p-g`, no `.n-g`; OR `.e
 
 Python script that auto-detects Chinese (CJK range) vs. English queries. English queries use `LIKE` with `COLLATE NOCASE`; Chinese queries use FTS5 MATCH. Falls back to Chinese search if English search finds nothing.
 
-Displays pronunciation (parsed from JSON) alongside definitions and Collins synonyms. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
+Displays pronunciation (parsed from JSON) inline on the word line with dimmed `/` delimiters, alongside definitions, synonyms, and antonyms from both dictionaries. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
 
-When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review, `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show Collins synonyms.
+When run without arguments, enters interactive mode with a `> ` prompt and sets the terminal title to "ecd". Commands: `.exit`/`.quit`/`.q` to quit, `.add [word]` to add a word to flashcard deck with dictionary lookup preview, `.auto-add [on|off]` to toggle auto-adding looked-up words, `.review` for SM-2 spaced repetition review, `.deck` for deck statistics, `.reset` to clear all flashcard data, `.syn [word]` to show synonyms from both dictionaries, `.ant [word]` to show antonyms.
 
 ## File editing
 
