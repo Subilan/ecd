@@ -138,7 +138,7 @@ def parse_collins_xref(tree, word):
             "pronunciation": None,
             "extra_notes": None,
         }
-    ]
+    ], [[]]
 
 
 def _extract_notes_from_figures(figures):
@@ -182,8 +182,71 @@ def _extract_notes_from_figures(figures):
     return notes
 
 
+def _extract_drv_entries(figures, word, pronunciation):
+    """Create entry dicts from type-drv figure.note elements (derived forms)."""
+    entries = []
+    for fig in figures:
+        b_tag = fig.cssselect("b")
+        if not b_tag:
+            continue
+        drv_word = b_tag[0].text_content().strip()
+        if not drv_word:
+            continue
+
+        examples = []
+        for li in fig.cssselect("li"):
+            ps = li.cssselect("p")
+            if len(ps) >= 2:
+                en_text = itertext(ps[0])
+                cn_text = itertext(ps[1])
+                if en_text or cn_text:
+                    examples.append((en_text, cn_text))
+
+        # Handle caption format (e.g. "bleakly")
+        cn_def = ""
+        caption = fig.cssselect(".caption")
+        if caption:
+            def_cn = caption[0].cssselect(".def_cn")
+            if def_cn:
+                cn_def = def_cn[0].text_content().strip()
+
+        if not cn_def and not examples:
+            continue
+
+        entries.append({
+            "word": drv_word,
+            "pos": "DRV",
+            "cn_definition": cn_def,
+            "cross_ref": None,
+            "sense_order": 1,
+            "examples": examples,
+            "pronunciation": pronunciation,
+            "extra_notes": None,
+        })
+    return entries
+
+
+def _extract_collins_synonyms(div):
+    """Extract synonym words from a .collins_en_cn div's .synonym block."""
+    syn_div = div.cssselect(".synonym")
+    if not syn_div:
+        return []
+    synonyms = []
+    for span in syn_div[0].cssselect("span.form"):
+        a_tag = span.cssselect("a")
+        if a_tag:
+            synonyms.append(a_tag[0].text_content().strip())
+        else:
+            text = span.text_content().strip()
+            if text:
+                synonyms.append(text)
+    return synonyms
+
+
 def parse_collins_regular(tree, word):
     entries = []
+    entry_synonyms = []  # list of lists, aligned with entries
+    seen_drv_words = set()  # deduplicate derived words within same entry
     en_cn_divs = tree.cssselect(".collins_en_cn")
 
     for div in en_cn_divs:
@@ -204,11 +267,26 @@ def parse_collins_regular(tree, word):
                 if en_text or cn_text:
                     examples.append((en_text, cn_text))
 
-        # Extract notes from figure.note inside this collins_en_cn
-        en_cn_notes = _extract_notes_from_figures(div.cssselect("figure.note"))
+        # Separate type-drv figures (derived forms) from other note figures
+        all_figs = div.cssselect("figure.note")
+        drv_figs = [f for f in all_figs if "type-drv" in (f.get("class", "") or "").split()]
+        other_figs = [f for f in all_figs if f not in drv_figs]
+
+        en_cn_notes = _extract_notes_from_figures(other_figs) if other_figs else []
         en_cn_notes_json = (
             json.dumps(en_cn_notes, ensure_ascii=False) if en_cn_notes else None
         )
+
+        synonyms = _extract_collins_synonyms(div)
+
+        # Create derived-form entries from type-drv figures (always, even
+        # if the main entry below is empty)
+        drv_entries = _extract_drv_entries(drv_figs, word, None)
+        for de in drv_entries:
+            if de["word"] not in seen_drv_words:
+                seen_drv_words.add(de["word"])
+                entries.append(de)
+                entry_synonyms.append([])
 
         if not cn_def and not examples and not en_cn_notes:
             continue
@@ -226,6 +304,7 @@ def parse_collins_regular(tree, word):
                 "extra_notes": en_cn_notes_json,
             }
         )
+        entry_synonyms.append(synonyms)
 
     # Collect figure.note elements NOT inside any .collins_en_cn
     # (e.g. quotation notes that are siblings of .collins_en_cn)
@@ -258,7 +337,7 @@ def parse_collins_regular(tree, word):
             else:
                 target["extra_notes"] = orphan_json
 
-    return entries
+    return entries, entry_synonyms
 
 
 def parse_oxford_xref(tree, word):
@@ -285,7 +364,7 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ]
+        ], [[]]
 
     # Derived-form xref: .derived with a link to parent word
     derived = tree.cssselect(".entry > .derived")
@@ -311,9 +390,9 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ]
+        ], [[]]
 
-    return []
+    return [], [[]]
 
 
 def _oxford_pos_for_ng(n_g, base_pos_spans):
@@ -520,7 +599,7 @@ def parse_oxford_regular(tree, word):
     entries = []
     entry_el = tree.cssselect(".entry")
     if not entry_el:
-        return entries
+        return [], [[]]
     entry_el = entry_el[0]
 
     top_gs = entry_el.cssselect(".top-g")
@@ -568,7 +647,7 @@ def parse_oxford_regular(tree, word):
         pos_spans = tree.cssselect(".top-g .block-g .pos")
         h_g = tree.cssselect(".h-g")
         if not h_g:
-            return entries
+            return [], [[]]
         h_g = h_g[0]
 
         pron = _extract_oxford_pronunciation(top_g) if top_g is not None else None
@@ -601,7 +680,8 @@ def parse_oxford_regular(tree, word):
 
     # Filter out entries with no definition and no examples
     # (e.g. abbreviation expansions with no Chinese translation)
-    return [e for e in entries if e["cn_definition"] or e["examples"]]
+    filtered = [e for e in entries if e["cn_definition"] or e["examples"]]
+    return filtered, [[] for _ in filtered]
 
 
 def is_oxford_xref(tree):
@@ -642,9 +722,10 @@ def is_collins_xref(tree):
 
 
 def parse_tabfile(filepath, source):
-    """Parse a tabfile, return (entry_rows, example_batches)."""
+    """Parse a tabfile, return (entry_rows, example_batches, synonym_batches)."""
     entry_rows = []
     example_batches = []
+    synonym_batches = []
 
     with open(filepath, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -671,18 +752,18 @@ def parse_tabfile(filepath, source):
 
             if source == "collins":
                 if is_collins_xref(tree):
-                    entries = parse_collins_xref(tree, word)
+                    entries, entry_synonyms = parse_collins_xref(tree, word)
                 else:
-                    entries = parse_collins_regular(tree, word)
+                    entries, entry_synonyms = parse_collins_regular(tree, word)
                 # Apply word-level pronunciation to all Collins entries
                 pron = _extract_collins_pronunciation(tree)
                 for e in entries:
                     e["pronunciation"] = pron
             else:
                 if is_oxford_xref(tree):
-                    entries = parse_oxford_xref(tree, word)
+                    entries, entry_synonyms = parse_oxford_xref(tree, word)
                 else:
-                    entries = parse_oxford_regular(tree, word)
+                    entries, entry_synonyms = parse_oxford_regular(tree, word)
 
             for entry in entries:
                 entry_rows.append(
@@ -702,8 +783,9 @@ def parse_tabfile(filepath, source):
                         for i, (en, cn) in enumerate(entry["examples"])
                     ]
                 )
+                synonym_batches.append(entry_synonyms.pop(0) if entry_synonyms else [])
 
-    return entry_rows, example_batches
+    return entry_rows, example_batches, synonym_batches
 
 
 def build_db(db_path, dicts_to_process, dict_paths):
@@ -714,6 +796,7 @@ def build_db(db_path, dicts_to_process, dict_paths):
         os.remove(db_path)
 
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(schema)
     conn.commit()
 
@@ -726,7 +809,7 @@ def build_db(db_path, dicts_to_process, dict_paths):
             extract_tabfile(dict_path, tabfile)
 
             print(f"Parsing {source} entries...", file=sys.stderr)
-            entry_rows, example_batches = parse_tabfile(tabfile, source)
+            entry_rows, example_batches, synonym_batches = parse_tabfile(tabfile, source)
 
             table = f"{source}_entries"
             print(
@@ -739,10 +822,18 @@ def build_db(db_path, dicts_to_process, dict_paths):
             entry_ids = []
             for row in entry_rows:
                 cur = conn.execute(
-                    f"INSERT INTO {table} (word, pos, cn_definition, cross_ref, sense_order, pronunciation, extra_notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    f"INSERT OR IGNORE INTO {table} (word, pos, cn_definition, cross_ref, sense_order, pronunciation, extra_notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     row,
                 )
-                entry_ids.append(cur.lastrowid)
+                if cur.lastrowid != 0:
+                    entry_ids.append(cur.lastrowid)
+                else:
+                    # Row was ignored due to UNIQUE constraint - find existing ID
+                    cur2 = conn.execute(
+                        f"SELECT id FROM {table} WHERE word=? AND pos=? AND sense_order=?",
+                        (row[0], row[1], row[4]),
+                    )
+                    entry_ids.append(cur2.fetchone()[0])
             conn.commit()
 
             # Build example rows with correct entry_id
@@ -763,13 +854,31 @@ def build_db(db_path, dicts_to_process, dict_paths):
             )
             conn.commit()
 
+            # Insert synonyms for Collins entries
+            if source == "collins":
+                synonym_rows = []
+                for entry_id, synonyms in zip(entry_ids, synonym_batches):
+                    for syn_word in synonyms:
+                        synonym_rows.append((entry_id, syn_word))
+                if synonym_rows:
+                    conn.execute("BEGIN")
+                    conn.executemany(
+                        "INSERT INTO synonyms (entry_id, synonym_word) VALUES (?, ?)",
+                        synonym_rows,
+                    )
+                    conn.commit()
+                    print(
+                        f"Inserting {len(synonym_rows)} synonyms...",
+                        file=sys.stderr,
+                    )
+
     # Populate FTS5
     print("Populating FTS5 index...", file=sys.stderr)
     for source in dicts_to_process:
         conn.execute(
             f"""
-            INSERT INTO entries_fts (source, word, cn_definition, en_example)
-            SELECT '{source}', e.word, e.cn_definition, x.en_example
+            INSERT INTO entries_fts (source, word, cn_definition, en_example, cn_example)
+            SELECT '{source}', e.word, e.cn_definition, x.en_example, x.cn_example
             FROM {source}_entries e
             LEFT JOIN {source}_examples x ON e.id = x.entry_id
             WHERE e.cross_ref IS NULL OR e.cross_ref = ''

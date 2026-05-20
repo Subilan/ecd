@@ -60,5 +60,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     word,
     cn_definition,
     en_example,
+    cn_example,
     tokenize='unicode61'
 );
+
+-- Synonyms from Collins entries
+CREATE TABLE IF NOT EXISTS synonyms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES collins_entries(id) ON DELETE CASCADE,
+    synonym_word TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_synonyms_entry ON synonyms(entry_id);
+CREATE INDEX IF NOT EXISTS idx_synonyms_word ON synonyms(synonym_word);

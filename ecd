@@ -17,11 +17,34 @@ import os
 import re
 import sqlite3
 import sys
+from datetime import datetime, timedelta
 
 try:
     import readline
 except ImportError:
     readline = None
+
+# --- Terminal color support ---
+_COLORS = {
+    "source": "\033[36m",   # cyan
+    "word": "\033[33m",     # yellow
+    "label": "\033[32m",    # green
+    "pron": "\033[35m",     # purple
+    "dim": "\033[2m",       # dim
+    "reset": "\033[0m",
+}
+
+_USE_COLOR = True
+
+
+def _c(name, text):
+    """Wrap text in ANSI color if colors are enabled."""
+    if not _USE_COLOR:
+        return text
+    code = _COLORS.get(name)
+    if code is None:
+        return text
+    return f"{code}{text}{_COLORS['reset']}"
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ecd.db")
 HISTORY_DB = os.path.expanduser("~/.ecd_lookup.db")
@@ -61,6 +84,21 @@ def _ensure_history_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS flashcards (
+            word TEXT NOT NULL PRIMARY KEY,
+            created TEXT NOT NULL DEFAULT (datetime('now')),
+            ease_factor REAL NOT NULL DEFAULT 2.5,
+            interval_days INTEGER NOT NULL DEFAULT 0,
+            repetitions INTEGER NOT NULL DEFAULT 0,
+            next_review TEXT NOT NULL DEFAULT (datetime('now', '+10 minutes')),
+            last_review TEXT,
+            total_reviews INTEGER NOT NULL DEFAULT 0,
+            total_correct INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -92,6 +130,282 @@ def format_entry(word, pos, cn_def, cross_ref, source_label):
     return lines
 
 
+# --- SM-2 spaced repetition algorithm ---
+
+_SM2_MIN_EF = 1.3
+_SM2_EASY_BONUS = 1.3
+_SM2_HARD_MULTIPLIER = 1.2
+_SM2_HARD_EF_PENALTY = 0.15
+_SM2_EASY_EF_BONUS = 0.15
+
+
+def _sm2_schedule(button, repetitions, interval_days, ease_factor):
+    """Calculate new SM-2 scheduling values after a review.
+
+    button: 0=Again (forgot), 1=Hard, 2=Good, 3=Easy
+    Returns: (new_repetitions, new_interval_days, new_ease_factor)
+    """
+    q_map = {0: 0, 1: 2, 2: 4, 3: 5}
+    q = q_map.get(button, 2)
+
+    new_ef = ease_factor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+    new_ef = max(_SM2_MIN_EF, round(new_ef, 2))
+
+    if button == 0:  # Again — complete reset
+        return (0, 0, new_ef)
+
+    if button == 1:  # Hard — short interval
+        new_int = max(1, round(interval_days * _SM2_HARD_MULTIPLIER)) if interval_days > 0 else 1
+        new_ef -= _SM2_HARD_EF_PENALTY
+        new_ef = max(_SM2_MIN_EF, round(new_ef, 2))
+        return (repetitions, new_int, new_ef)
+
+    if button == 2:  # Good — standard SM-2
+        if repetitions == 0:
+            new_int = 1
+        elif repetitions == 1:
+            new_int = 6
+        else:
+            new_int = round(interval_days * ease_factor)
+        new_int = max(1, new_int)
+        return (repetitions + 1, new_int, new_ef)
+
+    # button == 3  Easy — with bonus multiplier
+    if repetitions == 0:
+        new_int = 1
+    elif repetitions == 1:
+        new_int = 6
+    else:
+        new_int = round(interval_days * ease_factor)
+    new_int = round(new_int * _SM2_EASY_BONUS)
+    new_int = max(1, new_int)
+    new_ef += _SM2_EASY_EF_BONUS
+    new_ef = round(new_ef, 2)
+    return (repetitions + 1, new_int, new_ef)
+
+
+# --- Flashcard operations ---
+
+_last_word = ""
+
+
+def add_flashcard(word):
+    """Add a word to the flashcard deck. Returns True if new, False if already exists."""
+    conn = _ensure_history_db()
+    try:
+        conn.execute("INSERT INTO flashcards (word) VALUES (?)", (word,))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def _get_due_cards(conn, limit=20):
+    """Fetch cards where next_review <= now."""
+    return conn.execute(
+        """
+        SELECT word, ease_factor, interval_days, repetitions, next_review,
+               total_reviews, total_correct
+        FROM flashcards
+        WHERE next_review <= datetime('now')
+        ORDER BY next_review
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def _get_card_count(conn):
+    return conn.execute("SELECT COUNT(*) FROM flashcards").fetchone()[0]
+
+
+def _get_due_count(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM flashcards WHERE next_review <= datetime('now')"
+    ).fetchone()[0]
+
+
+def _get_new_count(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM flashcards WHERE repetitions = 0"
+    ).fetchone()[0]
+
+
+def _get_mature_count(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM flashcards WHERE interval_days >= 21"
+    ).fetchone()[0]
+
+
+def _get_avg_ease(conn):
+    row = conn.execute("SELECT AVG(ease_factor) FROM flashcards").fetchone()[0]
+    return round(row, 2) if row else 0.0
+
+
+def print_deck_stats():
+    """Print flashcard deck statistics."""
+    conn = _ensure_history_db()
+    total = _get_card_count(conn)
+    if total == 0:
+        print("Deck is empty. Use .add to add words.")
+        conn.close()
+        return
+    due = _get_due_count(conn)
+    newc = _get_new_count(conn)
+    mature = _get_mature_count(conn)
+    avg_ef = _get_avg_ease(conn)
+    conn.close()
+
+    print(f"\n{_c('label', 'Deck Statistics')}")
+    print(f"  {_c('label', 'Total:')}        {total}")
+    print(f"  {_c('label', 'Due:')}          {due}")
+    print(f"  {_c('label', 'New:')}          {newc}")
+    print(f"  {_c('label', 'Mature:')}       {mature}")
+    print(f"  {_c('label', 'Avg ease:')}     {avg_ef:.0%}")
+    print()
+
+
+def review_session(db_dict):
+    """Run an interactive review session for due flashcards."""
+    conn = _ensure_history_db()
+    due = _get_due_cards(conn)
+
+    if not due:
+        print("No cards due for review!")
+        total = _get_card_count(conn)
+        if total > 0:
+            print(f"Deck has {total} cards. Next cards due later.")
+        conn.close()
+        return
+
+    total_cards = len(due)
+
+    for i, card in enumerate(due, 1):
+        word, ef, interval_days, reps, next_review, total_rev, total_corr = card
+
+        results = search_english(db_dict, word)
+
+        print(f"\n{'=' * 40}")
+        print(f"Card {i}/{total_cards}")
+        print(f"{'=' * 40}")
+
+        # Front of card
+        print(f"\n  {_c('word', word)}")
+        if results:
+            pron = results[0].get("pronunciation", "")
+            if pron:
+                try:
+                    ipas = json.loads(pron)
+                    if ipas:
+                        print(f"  {_c('pron', ' | '.join(ipas))}")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        try:
+            input("\nPress Enter to reveal answer...")
+        except (EOFError, KeyboardInterrupt):
+            print("\nReview session cancelled.")
+            conn.close()
+            return
+
+        # Back of card
+        if results:
+            r = results[0]
+            print(f"\n  {_c('label', 'POS:')} {r.get('pos', '') or '(none)'}")
+            cn_def = r.get('cn_definition', '')
+            if cn_def:
+                print(f"  {_c('label', '释义:')} {cn_def}")
+
+            for en, cn in r.get("examples", []):
+                if en and cn:
+                    print(f"  {_c('label', '例:')} {en} / {cn}")
+                elif en:
+                    print(f"  {_c('label', '例:')} {en}")
+                elif cn:
+                    print(f"  {_c('label', '例译:')} {cn}")
+
+            synonyms = r.get("synonyms", [])
+            if synonyms:
+                syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
+            print(f"  {_c('label', '同义:')} {syn_text}")
+
+            extra = r.get("extra_notes", "")
+            if extra:
+                try:
+                    notes = json.loads(extra)
+                    for note in notes:
+                        note_type = note.get("type", "")
+                        type_label = {
+                            "usage": "用法", "drv": "派生", "regional": "地域",
+                            "sense": "释义补充", "quotation": "引文",
+                            "phrase": "短语", "note": "注",
+                        }.get(note_type, note_type)
+                        en = note.get("en", "")
+                        cn = note.get("cn", "")
+                        if en and cn:
+                            print(f"  {_c('label', f'[{type_label}]')} {en} / {cn}")
+                        elif en:
+                            print(f"  {_c('label', f'[{type_label}]')} {en}")
+                        elif cn:
+                            print(f"  {_c('label', f'[{type_label}]')} {cn}")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        else:
+            print(f"\n  {_c('dim', '(word not found in dictionary database)')}")
+
+        # Rating
+        while True:
+            try:
+                inp = input(
+                    f"\n{_c('label', 'Rate:')} "
+                    f"0={_c('dim', 'Again')} "
+                    f"1={_c('dim', 'Hard')} "
+                    f"2={_c('dim', 'Good')} "
+                    f"3={_c('dim', 'Easy')}: "
+                ).strip()
+                if not inp:
+                    continue
+                button = int(inp)
+                if button not in (0, 1, 2, 3):
+                    print("Please enter 0, 1, 2, or 3.")
+                    continue
+                break
+            except ValueError:
+                print("Please enter a number (0-3).")
+            except (EOFError, KeyboardInterrupt):
+                print("\nReview session cancelled.")
+                conn.close()
+                return
+
+        # Apply SM-2
+        new_reps, new_int, new_ef = _sm2_schedule(button, reps, interval_days, ef)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        next_review_dt = datetime.now() + timedelta(days=new_int)
+        next_review_str = next_review_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        conn.execute(
+            """
+            UPDATE flashcards
+            SET ease_factor = ?,
+                interval_days = ?,
+                repetitions = ?,
+                next_review = ?,
+                last_review = ?,
+                total_reviews = total_reviews + 1,
+                total_correct = total_correct + ?
+            WHERE word = ?
+            """,
+            (new_ef, new_int, new_reps, next_review_str, now_str,
+             1 if button >= 2 else 0, word),
+        )
+        conn.commit()
+
+    conn.close()
+    print(f"\n{_c('label', 'Review session complete.')} {total_cards} card(s) reviewed.")
+
+
 def search_english(db, word, source=None):
     """Search by English word. Returns list of (source, entry, examples)."""
     sources = [source] if source else ["collins", "oxford"]
@@ -118,19 +432,28 @@ def search_english(db, word, source=None):
                 """,
                 (entry_id,),
             ).fetchall()
-            results.append(
-                {
-                    "source": src,
-                    "word": w,
-                    "pos": pos,
-                    "cn_definition": cn_def,
-                    "cross_ref": cross_ref,
-                    "sense_order": sense_order,
-                    "pronunciation": pronunciation,
-                    "extra_notes": extra_notes,
-                    "examples": [(e[0], e[1]) for e in examples],
-                }
-            )
+            result = {
+                "entry_id": entry_id,
+                "source": src,
+                "word": w,
+                "pos": pos,
+                "cn_definition": cn_def,
+                "cross_ref": cross_ref,
+                "sense_order": sense_order,
+                "pronunciation": pronunciation,
+                "extra_notes": extra_notes,
+                "examples": [(e[0], e[1]) for e in examples],
+            }
+            # Fetch synonyms for Collins entries
+            if src == "collins":
+                syn_rows = db.execute(
+                    "SELECT synonym_word FROM synonyms WHERE entry_id = ? ORDER BY id",
+                    (entry_id,),
+                ).fetchall()
+                result["synonyms"] = [r[0] for r in syn_rows]
+            else:
+                result["synonyms"] = []
+            results.append(result)
     return results
 
 
@@ -160,19 +483,27 @@ def search_english_prefix(db, word, source=None):
                 """,
                 (entry_id,),
             ).fetchall()
-            results.append(
-                {
-                    "source": src,
-                    "word": w,
-                    "pos": pos,
-                    "cn_definition": cn_def,
-                    "cross_ref": cross_ref,
-                    "sense_order": sense_order,
-                    "pronunciation": pronunciation,
-                    "extra_notes": extra_notes,
-                    "examples": [(e[0], e[1]) for e in examples],
-                }
-            )
+            result = {
+                "entry_id": entry_id,
+                "source": src,
+                "word": w,
+                "pos": pos,
+                "cn_definition": cn_def,
+                "cross_ref": cross_ref,
+                "sense_order": sense_order,
+                "pronunciation": pronunciation,
+                "extra_notes": extra_notes,
+                "examples": [(e[0], e[1]) for e in examples],
+            }
+            if src == "collins":
+                syn_rows = db.execute(
+                    "SELECT synonym_word FROM synonyms WHERE entry_id = ? ORDER BY id",
+                    (entry_id,),
+                ).fetchall()
+                result["synonyms"] = [r[0] for r in syn_rows]
+            else:
+                result["synonyms"] = []
+            results.append(result)
     return results
 
 
@@ -199,7 +530,7 @@ def search_chinese(db, text, source=None):
     # FTS5 requires specific syntax
     rows = db.execute(
         f"""
-        SELECT source, word, cn_definition, en_example
+        SELECT source, word, cn_definition, en_example, cn_example
         FROM entries_fts
         WHERE entries_fts MATCH ?
         ORDER BY rank
@@ -210,13 +541,15 @@ def search_chinese(db, text, source=None):
 
     results = {}
     for row in rows:
-        src, word, cn_def, en_example = row
+        src, word, cn_def, en_example, cn_example = row
         if source and src != source:
             continue
         key = (src, word, cn_def or "")
         if key not in results:
             results[key] = []
-        if en_example:
+        if cn_example:
+            results[key].append(cn_example)
+        elif en_example:
             results[key].append(en_example)
 
     return results
@@ -228,7 +561,7 @@ def print_results_english(results):
     for r in results:
         src_label = source_names.get(r["source"], r["source"])
         pos_str = f" {r['pos']}" if r["pos"] else ""
-        header = f"{src_label}: 【{r['word']}】{pos_str}"
+        header = f"{_c('source', src_label)}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}"
         if r["cross_ref"]:
             header += f"  -> see: {r['cross_ref']}"
         print(header)
@@ -238,19 +571,25 @@ def print_results_english(results):
             try:
                 ipas = json.loads(r["pronunciation"])
                 if ipas:
-                    print(f"  发音: {' | '.join(ipas)}")
+                    print(f"  {_c('label', '发音:')} {_c('pron', ' | '.join(ipas))}")
             except (json.JSONDecodeError, TypeError):
                 pass
 
         if r["cn_definition"]:
-            print(f"  释义: {r['cn_definition']}")
+            print(f"  {_c('label', '释义:')} {r['cn_definition']}")
         for en, cn in r["examples"]:
             if en and cn:
-                print(f"  例: {en} / {cn}")
+                print(f"  {_c('label', '例:')} {en} / {cn}")
             elif en:
-                print(f"  例: {en}")
+                print(f"  {_c('label', '例:')} {en}")
             elif cn:
-                print(f"  例译: {cn}")
+                print(f"  {_c('label', '例译:')} {cn}")
+        # Display synonyms
+        synonyms = r.get("synonyms", [])
+        if synonyms:
+            syn_text = _c('dim', ', ').join(_c('word', s) for s in synonyms)
+            print(f"  {_c('label', '同义:')} {syn_text}")
+
         # Display extra_notes (usage notes, etc.)
         if r.get("extra_notes"):
             try:
@@ -269,11 +608,11 @@ def print_results_english(results):
                     en = note.get("en", "")
                     cn = note.get("cn", "")
                     if en and cn:
-                        print(f"  [{type_label}] {en} / {cn}")
+                        print(f"  {_c('label', f'[{type_label}]')} {en} / {cn}")
                     elif en:
-                        print(f"  [{type_label}] {en}")
+                        print(f"  {_c('label', f'[{type_label}]')} {en}")
                     elif cn:
-                        print(f"  [{type_label}] {cn}")
+                        print(f"  {_c('label', f'[{type_label}]')} {cn}")
             except (json.JSONDecodeError, TypeError):
                 pass
         print()
@@ -284,13 +623,15 @@ def print_results_chinese(results):
 
     for (src, word, cn_def), examples in results.items():
         src_label = source_names.get(src, src)
-        print(f"{src_label}: 【{word}】 {cn_def}")
+        print(f"{_c('source', src_label)}: 【{_c('word', word)}】 {cn_def}")
         for ex in examples[:3]:
             print(f"  {ex}")
         print()
 
 
 def handle_query(db, query, source):
+    global _last_word
+
     if is_chinese_query(query):
         results = search_chinese(db, query, source)
         if not results:
@@ -298,11 +639,13 @@ def handle_query(db, query, source):
             return
         print_results_chinese(results)
         record_lookup(query)
+        _last_word = query
     else:
         results = search_english(db, query, source)
         if results:
             print_results_english(results)
             record_lookup(query.lower())
+            _last_word = query.lower()
             return
 
         # No exact match — try prefix search
@@ -313,6 +656,7 @@ def handle_query(db, query, source):
                 word = distinct_words[0]
                 print_results_english(prefix_results)
                 record_lookup(word.lower())
+                _last_word = word.lower()
             else:
                 print(f"Did you mean: {', '.join(distinct_words[:10])}?")
             return
@@ -328,12 +672,15 @@ def handle_query(db, query, source):
         if results_cn:
             print_results_chinese(results_cn)
             record_lookup(query)
+            _last_word = query
         else:
             print(f"No results for: {query}")
 
 
 def interactive(db, source):
-    print("ecd interactive mode. Type .help for commands, .exit or Ctrl-D to quit.\n")
+    global _last_word
+
+    print(f"\033]0;ecd\007{_c('word', 'ecd')} interactive mode. Type .help for commands, .exit or Ctrl-D to quit.\n")
     while True:
         try:
             query = input("\n> ").strip()
@@ -349,8 +696,55 @@ def interactive(db, source):
             if cmd in (".exit", ".quit", ".q"):
                 break
             elif cmd == ".help":
-                print("Commands: .exit .quit .q .help")
+                print("Commands:")
+                print("  .exit .quit .q   Exit")
+                print("  .help            Show this help")
+                print("  .add             Add last looked-up word to flashcard deck")
+                print("  .review          Review due flashcards")
+                print("  .deck            Show flashcard deck statistics")
+                print("  .syn [word]      Show Collins synonyms for a word")
                 print("Enter any English or Chinese text to search.")
+                continue
+            elif cmd.startswith(".syn"):
+                syn_word = query[5:].strip()
+                if not syn_word:
+                    syn_word = _last_word
+                if not syn_word:
+                    print("Usage: .syn <word>")
+                    continue
+                results = search_english(db, syn_word, source="collins")
+                if not results:
+                    print(f"No Collins entries found for '{syn_word}'.")
+                    continue
+                syn_results = [(r, r.get("synonyms", [])) for r in results if r.get("synonyms")]
+                if not syn_results:
+                    print(f"No synonyms found for '{syn_word}'.")
+                    continue
+                print(f"\n找到 {len(syn_results)} 个同义词组：")
+                for r, syns in syn_results:
+                    pos_str = f" {r['pos']}" if r["pos"] else ""
+                    print(f"\n{_c('source', '柯林斯')}: 【{_c('word', r['word'])}】{_c('dim', pos_str)}")
+                    if r["cn_definition"]:
+                        print(f"  {_c('label', '释义:')} {r['cn_definition']}")
+                    syn_text = _c('dim', ', ').join(_c('word', s) for s in syns)
+                    print(f"  {_c('label', '同义:')} {syn_text}")
+                print()
+                continue
+            elif cmd == ".add":
+                if not _last_word:
+                    print("No word to add. Look up a word first.")
+                    continue
+                added = add_flashcard(_last_word)
+                if added:
+                    print(f"Added '{_last_word}' to flashcard deck.")
+                else:
+                    print(f"'{_last_word}' is already in your flashcard deck.")
+                continue
+            elif cmd == ".review":
+                review_session(db)
+                continue
+            elif cmd == ".deck":
+                print_deck_stats()
                 continue
             else:
                 print(f"Unknown command: {query}")
@@ -362,6 +756,8 @@ def interactive(db, source):
 
 
 def main():
+    global _USE_COLOR
+
     parser = argparse.ArgumentParser(
         description="Query the ecd dictionary database"
     )
@@ -372,11 +768,19 @@ def main():
         help="Search only one dictionary",
     )
     parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI color output",
+    )
+    parser.add_argument(
         "query",
         nargs="*",
         help="Word or phrase to look up",
     )
     args = parser.parse_args()
+
+    if args.no_color or not sys.stdout.isatty():
+        _USE_COLOR = False
 
     if not os.path.exists(DB_PATH):
         print(f"Error: database not found at {DB_PATH}", file=sys.stderr)
@@ -384,6 +788,7 @@ def main():
         sys.exit(1)
 
     db = sqlite3.connect(DB_PATH)
+    db.execute("PRAGMA foreign_keys = ON")
 
     if args.query:
         query = " ".join(args.query)
