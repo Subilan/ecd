@@ -142,7 +142,11 @@ def parse_collins_xref(tree, word):
 
 
 def _extract_notes_from_figures(figures):
-    """Extract extra_notes from figure.note elements. Returns list of note dicts."""
+    """Extract extra_notes from figure.note elements. Returns list of note dicts.
+
+    Each figure produces exactly one note, combining any inline definition text
+    with its <li> examples so they display as a single unit.
+    """
     notes = []
     for fig in figures:
         cls = fig.get("class", "")
@@ -151,34 +155,88 @@ def _extract_notes_from_figures(figures):
             if part.startswith("type-"):
                 note_type = part.replace("type-", "")
                 break
-        # Format 1: <li><p>en</p><p>cn</p></li>
-        had_li = False
+
+        # Quotation figures: parse .cit elements individually
+        if note_type == "quotation":
+            cits = fig.cssselect(".cit")
+            if cits:
+                cit_parts = []
+                for cit in cits:
+                    # Quote text from blockquote > p or span.quote
+                    bq = cit.cssselect("blockquote p")
+                    sq = cit.cssselect("span.quote")
+                    if bq:
+                        q_text = itertext(bq[0])
+                    elif sq:
+                        # Replace <br> with "\n" text nodes
+                        for br in sq[0].cssselect("br"):
+                            br.tail = ("\n" + (br.tail or ""))
+                        raw = sq[0].text_content()
+                        q_text = re.sub(r"[ \t]+", " ", raw).strip()
+                    else:
+                        q_text = ""
+                    # Attribution from cite
+                    cite_el = cit.cssselect("cite")
+                    attr = cite_el[0].text_content().strip() if cite_el else ""
+                    if q_text and attr:
+                        cit_parts.append(f"{q_text}\n{attr}")
+                    elif q_text:
+                        cit_parts.append(q_text)
+
+                if cit_parts:
+                    final_en = "\n\n".join(cit_parts)
+                    notes.append(
+                        {"type": note_type, "en": final_en, "cn": ""}
+                    )
+                continue
+
+        # Extract definition / explanation text (non-<ul> content).
+        fig_copy = copy.deepcopy(fig)
+        for ul in fig_copy.cssselect("ul"):
+            parent = ul.getparent()
+            if parent is not None:
+                parent.remove(ul)
+        def_cn_spans = fig_copy.cssselect(".def_cn")
+        cn_parts = []
+        for s in def_cn_spans:
+            cn_parts.append(s.text_content().strip())
+            parent = s.getparent()
+            if parent is not None:
+                parent.remove(s)
+        cn_text = " ".join(p for p in cn_parts if p)
+        en_text = itertext(fig_copy)
+        # Strip dictionary UI labels ("Usage Note :", "Quotations ", etc.)
+        en_text = re.sub(r"^(Usage Note|Quotations?)\s*:?\s*", "", en_text)
+
+        # Collect examples from <li><p> pairs
+        examples = []
         for li in fig.cssselect("li"):
-            had_li = True
             ps = li.cssselect("p")
             if len(ps) >= 2:
-                en_text = itertext(ps[0])
-                cn_text = itertext(ps[1])
-                if en_text or cn_text:
-                    notes.append(
-                        {"type": note_type, "en": en_text, "cn": cn_text}
-                    )
-        # Format 2: inline text with .def_cn spans (e.g. regional notes)
-        if not had_li:
-            fig_copy = copy.deepcopy(fig)
-            def_cn_spans = fig_copy.cssselect(".def_cn")
-            cn_parts = []
-            for s in def_cn_spans:
-                cn_parts.append(s.text_content().strip())
-                parent = s.getparent()
-                if parent is not None:
-                    parent.remove(s)
-            cn_text = " ".join(p for p in cn_parts if p)
-            en_text = itertext(fig_copy)
-            if en_text or cn_text:
-                notes.append(
-                    {"type": note_type, "en": en_text, "cn": cn_text}
-                )
+                ex_en = itertext(ps[0])
+                ex_cn = itertext(ps[1])
+                if ex_en or ex_cn:
+                    examples.append((ex_en, ex_cn))
+
+        # Combine definition and examples into a single note
+        parts_en = [en_text] if en_text else []
+        parts_cn = [cn_text] if cn_text else []
+        for ex_en, ex_cn in examples:
+            if ex_en and ex_cn:
+                parts_en.append(ex_en)
+                parts_cn.append(ex_cn)
+            elif ex_en:
+                parts_en.append(ex_en)
+            elif ex_cn:
+                parts_cn.append(ex_cn)
+
+        final_en = "\n".join(parts_en).strip()
+        final_cn = "\n".join(parts_cn).strip()
+        if final_en or final_cn:
+            notes.append(
+                {"type": note_type, "en": final_en, "cn": final_cn}
+            )
+
     return notes
 
 
@@ -618,6 +676,14 @@ def _extract_oxford_xrefs(container_el):
                 if w:
                     antonyms.append(w)
             continue
+        syn = xr_g.cssselect(".symbols-synsym")
+        if syn:
+            xr = xr_g.cssselect(".xr .xh a")
+            if xr:
+                w = xr[0].text_content().strip()
+                if w:
+                    synonyms.append(w)
+            continue
         z_xr = xr_g.cssselect(".z_xr")
         if z_xr and "synonym" in z_xr[0].text_content().lower():
             xr = xr_g.cssselect(".xr .xh a")
@@ -688,6 +754,9 @@ def parse_oxford_regular(tree, word):
     else:
         # Pattern 2: n-g directly in h-g, POS from top-g > block-g (e.g. "beauty")
         pos_spans = tree.cssselect(".top-g .block-g .pos")
+        # Fallback for run-on entries (e.g. "radically"): POS in .top-g > .pos-g > .pos
+        if not pos_spans:
+            pos_spans = tree.cssselect(".top-g > .pos-g .pos")
         h_g = tree.cssselect(".h-g")
         if not h_g:
             return [], [[]], [[]]

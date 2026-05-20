@@ -84,7 +84,7 @@ CREATE INDEX idx_synonyms_entry ON synonyms(source, entry_id);
 CREATE INDEX idx_synonyms_word ON synonyms(synonym_word);
 ```
 
-Collins: extracted from `<div class="synonym">` blocks. Oxford: extracted from `.xr-g` elements containing `.z_xr "synonyms at"` cross-references.
+Collins: extracted from `<div class="synonym">` blocks. Oxford: extracted from `.xr-g` elements containing `.symbols-synsym` (SYN) markers or `.z_xr "synonyms at"` cross-references.
 
 ### Antonyms Table
 
@@ -122,7 +122,7 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 2. **POS**: `span.st` text (COBUILD codes like `N-COUNT`, `ADJ-GRADED`, `VERB`). Use `.//text()` to handle inner elements
 3. **cn_definition**: `span.def_cn` text within each `collins_en_cn` div
 4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words. **Exclude `<li>` inside `<figure class="note">` elements** — those are extra_notes, not examples.
-5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`, **excluding `type-drv`**. Two formats: (a) `<li><p>en</p><p>cn</p></li>` inside figure (usage/sense notes), (b) inline text with `.def_cn` spans (regional notes like "in AM, use…"). Orphan figures outside `.collins_en_cn` (e.g. quotation notes) are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
+5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`, **excluding `type-drv`**. Each figure produces one note combining inline definition text with any `<li>` examples. Quotation notes (`type-quotation`) are parsed from individual `.cit` elements (each containing `blockquote > p` or `span.quote` for quote text and `cite` for attribution), with quotes joined by double newlines. `<br>` tags in `span.quote` are converted to newlines. Orphan figures outside `.collins_en_cn` are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
 6. **Derived forms**: `<figure class="note type-drv">` elements are handled by `_extract_drv_entries()` → standalone entries with `pos='DRV'`, word from `<b>` tag, examples from `<li><p>` pairs. Same-pronunciation as parent entry.
 7. **Synonyms**: `<div class="synonym">` blocks → `_extract_collins_synonyms()` extracts each `<span class="form">` (link text or plain text). Stored in `synonyms` table with `source='collins'`.
 
@@ -130,6 +130,7 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 
 `.xr-g` cross-reference elements are parsed by `_extract_oxford_xrefs()` per entry container (`n-g`, `p-g`, `h-g`, `sense-g`):
 - `.symbols-oppsym` (OPP) markers → antonyms
+- `.symbols-synsym` (SYN) markers → synonyms (e.g. "radical" sense 1 → "far-reaching")
 - `.z_xr` elements containing "synonyms at" → synonym cross-references
 
 Stored in `synonyms` and `antonyms` tables with `source='oxford'`, one entry per sense (not duplicated across senses).
@@ -158,7 +159,7 @@ HTML structure: `span.entry` → `span.p-g` (POS groups) → `span.n-g` (sense g
 1. **Word**: `span.h` text, fallback to `<h1>` text
 2. **POS**: Depends on pattern:
    - Patterns 1/3: Per `p-g` block: `span.pos` text + `span.gr` text (if present), joined with a space.
-   - Pattern 2: Per `n-g`: `span.pos` from `top-g > block-g > pos-g` + `.gr` spans inside `n-g`. Handled by `_oxford_pos_for_ng()`.
+   - Pattern 2: Per `n-g`: `span.pos` from `top-g > block-g > pos-g` + `.gr` spans inside `n-g`. For run-on entries (e.g. "radically"): fallback to `.top-g > .pos-g .pos`. Handled by `_oxford_pos_for_ng()`.
    - Pattern 4: `span.pos` from `top-g > block-g > pos-g` + `.gr` spans in `top-g` or `h-g`. Handled by `_oxford_make_pos()`.
    - Pattern 4b (idioms): POS is `"IDM <phrase>"` from `.id` text inside `.id-g`.
 3. **cn_definition**: `span.oalecd8e_chn` within `span.def-g` under each `n-g` (Patterns 1/2), or directly under `h-g`/`p-g` (Patterns 3/4), or under `ids-g > id-g > sense-g > def-g` (Pattern 4b)
@@ -186,9 +187,10 @@ Extraction for xref:
 | Oxford Pattern 4: `def-g` directly under `h-g` (no `p-g`/`n-g`) | `_oxford_parse_hg_direct()` handles — POS from `top-g > block-g > pos`, grammar from `top-g > .gr`. Examples from sibling `.x-g` in `h-g` |
 | Oxford Pattern 4b: `ids-g` idioms under `h-g` | Each `id-g > sense-g` becomes a separate entry with `IDM <phrase>` POS |
 | Oxford derived-form xref (`.entry > .derived`, e.g. "abasement") | Treat as cross-reference — `cn_definition` from `.de_e`/`.de_c`, `cross_ref` from `<a>` link |
+| Oxford run-on entries with `.derived` but also `.n-g` content (e.g. "radically") | Treated as regular entries (Pattern 2). POS fallback from `.top-g > .pos-g .pos` when `.block-g` absent. Entry passes filter if it has examples even without a definition. |
 | Oxford modal verbs (`must`) — `span.pos` outside `p-g` | Check `block-g > pos-g > pos` at entry level, not just inside `p-g` |
 | Collins `<dfn>` tags in example `<p>` | Use `.//text()` not `.text` to collect all text nodes |
-| Collins `<figure class="note type-*">` elements | Exclude from examples; extract as `extra_notes` JSON. Two formats: `<li><p>` pairs and inline `.def_cn` text |
+| Collins `<figure class="note type-*">` elements | Exclude from examples; extract as `extra_notes` JSON. Each figure produces one note combining inline text and `<li>` examples. Quotation notes parsed from `.cit > blockquote p` or `.cit > span.quote` + `.cit > cite` |
 | Collins `<figure class="note type-drv">` derived forms | Create standalone entries with `pos='DRV'`, word from `<b>` tag, examples from `<li><p>` pairs. Deduplicated within parent by `seen_drv_words` set |
 | Collins `<div class="synonym">` blocks | Extract `<span class="form">` children (both `<a>` links and plain text) into `synonyms` table keyed to entry ID |
 | Collins orphan `figure.note` outside `.collins_en_cn` (quotations) | Attach to first entry with a definition |
@@ -231,6 +233,7 @@ Python script in project root:
 - For xref entries: display "→ see `<cross_ref>`" and optionally follow the ref
 - **Pronunciation display**: Parsed from JSON array, displayed inline on the word line as ` /IPA1 | IPA2/` (purple IPA, dimmed `/` delimiters).
 - **Synonym/Antonym display**: Entries show `同义: synonym1, ...` and `反义: antonym1, ...` (dim commas).
+- **Extra notes display**: Label (`[用法]`, `[名言]`, `[释义补充]`, `[注]`) on its own line, content on following lines without indentation. Multi-line notes (quotations, usage notes with examples) have each segment on its own line. Separate quotes are joined with a blank line.
 - **Lookup history**: Stored in `~/.ecd_lookup.db` (separate from stateless `ecd.db`). `record_lookup()` upserts the queried word with count + timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions and empty results are not recorded. History survives `ecd.db` rebuilds.
 - **Interactive mode**: Sets terminal title to "ecd". Commands: `.add [word]` (add word to flashcard deck with dictionary lookup preview), `.auto-add [on|off]` (toggle auto-adding looked-up words), `.review` (SM-2 spaced repetition review with Again/Hard/Good/Easy rating), `.deck` (deck statistics), `.reset` (clear all flashcard data), `.syn [word]` (show synonyms from both dictionaries), `.ant [word]` (show antonyms), `.exit`/`.quit`/`.q` to exit.
 - **Flashcard deck**: SM-2 algorithm with ease factor, interval days, repetition count. Cards stored in `~/.ecd_lookup.db` `flashcards` table. Flashcard data is independent of dictionary data — only stores word + SM-2 metadata, looks up `ecd.db` for display during review.
@@ -259,7 +262,7 @@ sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE pos = 'DRV'"
 
 # Synonyms (both dictionaries)
 sqlite3 ../ecd.db "SELECT source, COUNT(*) FROM synonyms GROUP BY source"
-# → expect collins ~85k, oxford ~800
+# → expect collins ~85k, oxford ~7,200
 
 # Antonyms
 sqlite3 ../ecd.db "SELECT source, COUNT(*) FROM antonyms GROUP BY source"
