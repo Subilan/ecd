@@ -66,10 +66,21 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
     word,
     cn_definition,
     en_example,
-    content='',     -- external content table
-    content_rowid='id',
+    cn_example,
     tokenize='unicode61'
 );
+```
+
+### Synonyms Table (Collins only)
+
+```sql
+CREATE TABLE IF NOT EXISTS synonyms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES collins_entries(id) ON DELETE CASCADE,
+    synonym_word TEXT NOT NULL
+);
+CREATE INDEX idx_synonyms_entry ON synonyms(entry_id);
+CREATE INDEX idx_synonyms_word ON synonyms(synonym_word);
 ```
 
 ### Why Separate Tables Per Dictionary
@@ -93,7 +104,9 @@ HTML structure: `div.word_entry` → `div.collins_en_cn` blocks, each containing
 2. **POS**: `span.st` text (COBUILD codes like `N-COUNT`, `ADJ-GRADED`, `VERB`). Use `.//text()` to handle inner elements
 3. **cn_definition**: `span.def_cn` text within each `collins_en_cn` div
 4. **Examples**: Each `<li>` inside `collins_en_cn` → first `<p>` is `en_example`, second `<p>` is `cn_example`. Use `.//text()` on `<p>` to handle `<dfn>` tags wrapping pronunciation words. **Exclude `<li>` inside `<figure class="note">` elements** — those are extra_notes, not examples.
-5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`. Two formats: (a) `<li><p>en</p><p>cn</p></li>` inside figure (usage/sense/derived-form notes), (b) inline text with `.def_cn` spans (regional notes like "in AM, use…"). Orphan figures outside `.collins_en_cn` (e.g. quotation notes) are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
+5. **extra_notes**: Extracted from `<figure class="note type-*">` elements via `_extract_notes_from_figures()`, **excluding `type-drv`**. Two formats: (a) `<li><p>en</p><p>cn</p></li>` inside figure (usage/sense notes), (b) inline text with `.def_cn` spans (regional notes like "in AM, use…"). Orphan figures outside `.collins_en_cn` (e.g. quotation notes) are attached to the first entry with a definition. Stored as JSON array of `{"type": "<type>", "en": "...", "cn": "..."}`.
+6. **Derived forms**: `<figure class="note type-drv">` elements are handled by `_extract_drv_entries()` → standalone entries with `pos='DRV'`, word from `<b>` tag, examples from `<li><p>` pairs. Same-pronunciation as parent entry.
+7. **Synonyms**: `<div class="synonym">` blocks → `_extract_collins_synonyms()` extracts each `<span class="form">` (link text or plain text). Returned alongside entries for insertion into `synonyms` table.
 6. **sense_order**: Enumerate `collins_en_cn` divs within a (word, pos) group
 7. **pronunciation**: `_extract_collins_pronunciation()` — `span.pron` at `word_entry` level → `span.pron.type_uk` and `span.pron.type_us`. IPA text has HTML markup (`<u>`, `<sup>`) stripped by `_clean_ipa()`. Applied to all entries for the word in `parse_tabfile()`. Stored as JSON array.
 
@@ -150,6 +163,8 @@ Extraction for xref:
 | Oxford modal verbs (`must`) — `span.pos` outside `p-g` | Check `block-g > pos-g > pos` at entry level, not just inside `p-g` |
 | Collins `<dfn>` tags in example `<p>` | Use `.//text()` not `.text` to collect all text nodes |
 | Collins `<figure class="note type-*">` elements | Exclude from examples; extract as `extra_notes` JSON. Two formats: `<li><p>` pairs and inline `.def_cn` text |
+| Collins `<figure class="note type-drv">` derived forms | Create standalone entries with `pos='DRV'`, word from `<b>` tag, examples from `<li><p>` pairs. Deduplicated within parent by `seen_drv_words` set |
+| Collins `<div class="synonym">` blocks | Extract `<span class="form">` children (both `<a>` links and plain text) into `synonyms` table keyed to entry ID |
 | Collins orphan `figure.note` outside `.collins_en_cn` (quotations) | Attach to first entry with a definition |
 | Collins level1–level5 frequency markers | Ignore |
 | Pure cross-reference entries | `pos=NULL`, `cn_definition`=description, `cross_ref`=target word |
@@ -184,12 +199,15 @@ Arguments:
 ### Step 3: `ecd` CLI
 
 Python script in project root:
-- `ecd <word>` — query both dictionaries, display formatted results with pronunciation
+- `ecd <word>` — query both dictionaries, display formatted results with pronunciation, synonyms, and examples
 - `ecd -s collins <word>` / `ecd -s oxford <word>` — single dictionary
 - `ecd <chinese>` — FTS5 reverse lookup
 - For xref entries: display "→ see `<cross_ref>`" and optionally follow the ref
-- **Pronunciation display**: Parsed from JSON array, displayed as `发音: /IPA1/ | /IPA2/`
+- **Pronunciation display**: Parsed from JSON array, displayed as `发音: /IPA1/ | /IPA2/` (purple color)
+- **Synonym display**: Collins entries show `同义: synonym1, synonym2, ...` (yellow color, dim commas)
 - **Lookup history**: Stored in `~/.ecd_lookup.db` (separate from stateless `ecd.db`). `record_lookup()` upserts the queried word with count + timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions and empty results are not recorded. History survives `ecd.db` rebuilds.
+- **Interactive mode**: Sets terminal title to "ecd". Commands: `.add` (add last word to flashcard deck), `.review` (SM-2 spaced repetition review with Again/Hard/Good/Easy rating), `.deck` (deck statistics), `.syn [word]` (show Collins synonyms, omits entries without synonyms), `.exit`/`.quit`/`.q` to exit.
+- **Flashcard deck**: SM-2 algorithm with ease factor, interval days, repetition count. Cards stored in `~/.ecd_lookup.db` `flashcards` table.
 
 ## Verification
 
@@ -199,15 +217,23 @@ cd extract && /tmp/dict_venv/bin/python build_db.py
 
 # Row counts
 sqlite3 ../ecd.db "SELECT 'collins_entries', COUNT(*) FROM collins_entries"
-# → expect ~77k
+# → expect ~81k (includes ~3.5k DRV entries)
 sqlite3 ../ecd.db "SELECT 'oxford_entries', COUNT(*) FROM oxford_entries"
 # → expect ~88k
 
 # Xref counts
-sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE cross_ref IS NOT NULL"
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE cross_ref IS NOT NULL AND cross_ref != ''"
 # → expect ~230
-sqlite3 ../ecd.db "SELECT COUNT(*) FROM oxford_entries WHERE cross_ref IS NOT NULL"
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM oxford_entries WHERE cross_ref IS NOT NULL AND cross_ref != ''"
 # → expect ~3,300 (includes .derived redirects)
+
+# DRV entries (Collins derived forms)
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE pos = 'DRV'"
+# → expect ~3,500
+
+# Synonyms
+sqlite3 ../ecd.db "SELECT COUNT(*) FROM synonyms"
+# → expect ~85k
 
 # Extra notes
 sqlite3 ../ecd.db "SELECT COUNT(*) FROM collins_entries WHERE extra_notes IS NOT NULL"
