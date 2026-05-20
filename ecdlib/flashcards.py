@@ -1,10 +1,13 @@
 """Flashcard deck statistics and review session."""
 
 import json
+import sys
+import termios
+import tty
 from datetime import datetime, timedelta, timezone
 
 from .config import _c
-from .db import _ensure_history_db, add_flashcard
+from .db import _ensure_history_db, add_flashcard, del_flashcard
 from .display import _print_entry_body
 from .search import search_english
 from .sm2 import _sm2_schedule
@@ -127,6 +130,42 @@ def print_deck_stats():
     print()
 
 
+def _get_key():
+    """Read a single keypress. Returns 'LEFT', 'RIGHT', or the character."""
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            ch2 = sys.stdin.read(1)
+            if ch2 == '[':
+                ch3 = sys.stdin.read(1)
+                if ch3 == 'D':
+                    return 'LEFT'
+                elif ch3 == 'C':
+                    return 'RIGHT'
+        elif ch in ('\x03', '\x04'):
+            raise KeyboardInterrupt
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def _print_flashcard_entry(entry, idx, total):
+    """Print one dictionary entry for flashcard review."""
+    source_names = {"collins": "柯林斯", "oxford": "牛津"}
+    src = source_names.get(entry["source"], entry["source"])
+    pos_str = entry.get("pos", "") or "(none)"
+    print(f"\n  {_c('dim', f'释义 {idx + 1}/{total}  [{src}]')}")
+    print(f"  {_c('label', 'POS:')} {pos_str}")
+    _print_entry_body(entry, indent="  ")
+    if total > 1:
+        print(f"\n  {_c('dim', '← → 切换释义  |  0-3 评分')}")
+    else:
+        print(f"\n  {_c('dim', '0-3 评分')}")
+
+
 def review_session(db_dict):
     """Run an interactive review session for due flashcards."""
     conn = _ensure_history_db()
@@ -136,7 +175,11 @@ def review_session(db_dict):
         print("No cards due for review!")
         total = _get_card_count(conn)
         if total > 0:
-            print(f"Deck has {total} cards. Next cards due later.")
+            delta_str, is_overdue = _get_next_review_info(conn)
+            if is_overdue:
+                print(f"Deck has {total} cards. Next was due {delta_str} ago — run again to review.")
+            else:
+                print(f"Deck has {total} cards. Next due in {delta_str}.")
         conn.close()
         return
 
@@ -173,35 +216,56 @@ def review_session(db_dict):
 
         # Back of card
         if results:
-            r = results[0]
-            print(f"\n  {_c('label', 'POS:')} {r.get('pos', '') or '(none)'}")
-            _print_entry_body(r, indent="  ")
+            entry_idx = 0
+            num_entries = len(results)
+
+            print("\033[s", end="", flush=True)
+            _print_flashcard_entry(results[0], 0, num_entries)
+
+            while True:
+                try:
+                    key = _get_key()
+                except KeyboardInterrupt:
+                    print("\nReview session cancelled.")
+                    conn.close()
+                    return
+
+                if key == 'LEFT':
+                    entry_idx = (entry_idx - 1) % num_entries
+                    print("\033[u\033[J", end="", flush=True)
+                    _print_flashcard_entry(results[entry_idx], entry_idx, num_entries)
+                elif key == 'RIGHT':
+                    entry_idx = (entry_idx + 1) % num_entries
+                    print("\033[u\033[J", end="", flush=True)
+                    _print_flashcard_entry(results[entry_idx], entry_idx, num_entries)
+                elif key in ('0', '1', '2', '3'):
+                    button = int(key)
+                    break
         else:
             print(f"\n  {_c('dim', '(word not found in dictionary database)')}")
-
-        # Rating
-        while True:
-            try:
-                inp = input(
-                    f"\n{_c('label', 'Rate:')} "
-                    f"0={_c('dim', 'Again')} "
-                    f"1={_c('dim', 'Hard')} "
-                    f"2={_c('dim', 'Good')} "
-                    f"3={_c('dim', 'Easy')}: "
-                ).strip()
-                if not inp:
-                    continue
-                button = int(inp)
-                if button not in (0, 1, 2, 3):
-                    print("Please enter 0, 1, 2, or 3.")
-                    continue
-                break
-            except ValueError:
-                print("Please enter a number (0-3).")
-            except (EOFError, KeyboardInterrupt):
-                print("\nReview session cancelled.")
-                conn.close()
-                return
+            # Rating
+            while True:
+                try:
+                    inp = input(
+                        f"\n{_c('label', 'Rate:')} "
+                        f"0={_c('dim', 'Again')} "
+                        f"1={_c('dim', 'Hard')} "
+                        f"2={_c('dim', 'Good')} "
+                        f"3={_c('dim', 'Easy')}: "
+                    ).strip()
+                    if not inp:
+                        continue
+                    button = int(inp)
+                    if button not in (0, 1, 2, 3):
+                        print("Please enter 0, 1, 2, or 3.")
+                        continue
+                    break
+                except ValueError:
+                    print("Please enter a number (0-3).")
+                except (EOFError, KeyboardInterrupt):
+                    print("\nReview session cancelled.")
+                    conn.close()
+                    return
 
         # Apply SM-2
         new_reps, new_int, new_ef = _sm2_schedule(button, reps, interval_days, ef)
@@ -264,3 +328,13 @@ def _add_word_with_check(db, word):
     else:
         print(f"'{word}' is already in your flashcard deck.")
     return True
+
+
+def _delete_word_with_check(word):
+    """Delete a word from the flashcard deck. Returns True if deleted, False if not found."""
+    deleted = del_flashcard(word)
+    if deleted:
+        print(f"Removed '{word}' from flashcard deck.")
+    else:
+        print(f"'{word}' is not in your flashcard deck.")
+    return deleted

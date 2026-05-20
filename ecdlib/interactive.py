@@ -2,7 +2,7 @@
 
 from .config import _auto_add, _c, _last_word, _save_history, readline
 from .db import add_flashcard, _ensure_history_db
-from .flashcards import _add_word_with_check, print_deck_stats, review_session
+from .flashcards import _add_word_with_check, _delete_word_with_check, print_deck_stats, review_session
 from .search import handle_query, random_word, search_english
 
 
@@ -43,6 +43,7 @@ def interactive(db, source):
                 print("  .exit .quit .q    Exit")
                 print("  .help             Show this help")
                 print("  .add [word]       Add word to flashcard deck (or last looked-up word)")
+                print("  .del [word]       Remove word from flashcard deck (or last looked-up word)")
                 print("  .auto-add [on|off] Toggle auto-add of looked-up words to deck")
                 print("  .review           Review due flashcards")
                 print("  .deck             Show flashcard deck statistics")
@@ -124,6 +125,13 @@ def interactive(db, source):
                 added = _add_word_with_check(db, word)
                 if added:
                     cfg._last_word = word
+                continue
+            elif cmd.startswith(".del "):
+                word = query[5:].strip()
+                if not word:
+                    print("Usage: .del <word>")
+                    continue
+                _delete_word_with_check(word)
                 continue
             elif cmd == ".auto-add" or cmd.startswith(".auto-add "):
                 _handle_auto_add(query)

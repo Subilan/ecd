@@ -62,3 +62,14 @@ def add_flashcard(word):
         return False
     finally:
         conn.close()
+
+
+def del_flashcard(word):
+    """Delete a word from the flashcard deck. Returns True if deleted, False if not found."""
+    conn = _ensure_history_db()
+    try:
+        cur = conn.execute("DELETE FROM flashcards WHERE word = ?", (word,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
