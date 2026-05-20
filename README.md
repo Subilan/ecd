@@ -15,7 +15,7 @@ ecd 是一个在命令行中运行的英汉词典。
 ## 依赖
 
 - Python 3.11+
-- 本地的词汇数据库 `ecd.db`（约 96MB），可通过解压 `ecd.db.xz` 得到
+- 本地的词汇数据库 `ecd.db`（约 114MB），可通过解压 `ecd.db.xz` 得到
     ```sh
     xz -d ecd.db.xz
     ```
@@ -48,10 +48,13 @@ ecd -s oxford beauty
 
 # 中文反查
 ecd 全面的
-ecd 精确的
-ecd 疑惑
-ecd 统一
-ecd 变化
+
+# 随机单词
+ecd -r
+ecd -r -s oxford
+
+# 禁用 ANSI 颜色输出
+ecd --no-color hello
 
 # 进入交互模式
 ecd
@@ -70,6 +73,8 @@ ecd
 | `.reset` | 清空所有卡片数据 |
 | `.syn [word]` | 查询同义词 |
 | `.ant [word]` | 查询反义词 |
+| `.random` | 随机显示一个单词 |
+| `.help` | 显示帮助信息 |
 | `.exit` `.quit` `.q` Ctrl+C Ctrl+D | 退出 |
 
 ## 记忆卡片
