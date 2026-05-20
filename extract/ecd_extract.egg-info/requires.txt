@@ -1,0 +1,4 @@
+pyglossary>=4.0.0
+lxml>=5.0.0
+cssselect>=1.2.0
+biplist>=1.0.0

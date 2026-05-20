@@ -13,16 +13,25 @@ extract/.venv/bin/pip install -r extract/requirements.txt
 
 ```bash
 # Build the database (takes ~30s)
-extract/.venv/bin/python extract/build_db.py
+# Option A: via installed console script
+pip install -e extract/ && ecd-build
+
+# Option B: via python -m (from repo root)
+extract/.venv/bin/python -m ecd_extract
+
+# Option C: install in editable mode
+extract/.venv/bin/pip install -e extract/
+extract/.venv/bin/ecd-build
 
 # Rebuild only one dictionary
-extract/.venv/bin/python extract/build_db.py --only oxford
+extract/.venv/bin/python -m ecd_extract --only oxford
 
 # Run the CLI (only needs stdlib sqlite3)
-python3 ecd hello          # English → both dictionaries
-python3 ecd 水             # Chinese → reverse lookup via FTS5
+./ecd hello                 # English → both dictionaries
+python3 ecd 水              # Chinese → reverse lookup via FTS5
 python3 ecd -s oxford beauty
-python3 ecd                 # Interactive mode (Ctrl-D or .exit to quit)
+./ecd                       # Interactive mode (Ctrl-D or .exit to quit)
+python3 -m ecdlib            # Same, via module
 ```
 
 The `extract/.venv/` and `ecd.db` (~80 MB) are git-ignored.
@@ -43,12 +52,18 @@ Each dictionary has two tables with identical column layouts — separate tables
 
 Cross-reference entries (e.g. "went" = past tense of "go", "mice" = plural of "mouse") have `pos=''` and a non-null `cross_ref` pointing to the canonical word. They are excluded from FTS5.
 
-### Extraction (`extract/build_db.py`)
+### Extraction (`extract/ecd_extract/`)
 
-`build_db()` is the top-level orchestrator. For each dictionary it:
-1. Shells out to `pyglossary --read-format AppleDictBin` to produce a tabfile
-2. `parse_tabfile()` reads the tabfile line-by-line, dispatches to per-dictionary parsers
-3. Entries and examples are inserted in explicit transactions, then FTS5 is populated
+Modular package. Key modules:
+- **`build.py`**: `build_db()` top-level orchestrator. For each dictionary it:
+  1. Shells out to `pyglossary --read-format AppleDictBin` to produce a tabfile
+  2. `parse_tabfile()` reads the tabfile line-by-line, dispatches to per-dictionary parsers
+  3. Entries and examples are inserted in explicit transactions, then FTS5 is populated
+- **`parse.py`**: `parse_tabfile()` dispatcher — reads tabfile, routes entries to Collins or Oxford parsers
+- **`collins.py`**: Collins parser (xref detection, regular entries, DRV entries, notes, synonyms, pronunciation)
+- **`oxford.py`**: Oxford parser (xref detection, regular entries across 4 HTML patterns, idioms, pronunciation)
+- **`utils.py`**: Shared utilities (`extract_tabfile`, `itertext`, `child_elements`, `clean_ipa`)
+- **`config.py`**: Paths, constants, pyglossary location
 
 **Collins word key**: For some entries (e.g. `'cause` = informal "because"), the tabfile key starts with a leading apostrophe, but the HTML `<span class="word_key">` contains the canonical form. The parser prefers `word_key` from HTML when available.
 
@@ -76,9 +91,19 @@ Xref detection in Oxford: `.sense-g .xr-g` present, no `.p-g`, no `.n-g`; OR `.e
 
 **Entry filtering**: Both Oxford and Collins parsers skip entries that have no `cn_definition` and no examples — these are noise (thesaurus headings, "See also:" links, abbreviation expansions without Chinese translation). Entries with examples but no Chinese definition are kept (English-only definitions with example sentences still have value).
 
-### CLI (`ecd`)
+### CLI (`ecd` + `ecdlib/`)
 
-Python script that auto-detects Chinese (CJK range) vs. English queries. English queries use `LIKE` with `COLLATE NOCASE`; Chinese queries use FTS5 MATCH. Falls back to Chinese search if English search finds nothing.
+The root `ecd` file is a thin wrapper that imports from the `ecdlib/` package. The package is modular:
+- **`cli.py`**: `main()` — argument parsing, DB connection, dispatch to interactive/query/random
+- **`interactive.py`**: `interactive()` REPL loop with all `.` commands
+- **`search.py`**: `search_english()`, `search_english_prefix()`, `search_english_fuzzy()`, `search_chinese()`, `random_word()`, `handle_query()` dispatch
+- **`display.py`**: `print_results_english()`, `print_results_chinese()`, `_print_entry_body()`
+- **`flashcards.py`**: `review_session()`, `print_deck_stats()`, `_add_word_with_check()`, SM-2 helpers
+- **`sm2.py`**: `_sm2_schedule()` algorithm and constants
+- **`db.py`**: `_ensure_history_db()`, `record_lookup()`, `add_flashcard()`
+- **`config.py`**: Colors, paths, CJK detection, readline setup, shared mutable state
+
+Auto-detects Chinese (CJK range) vs. English queries. English queries use `LIKE` with `COLLATE NOCASE`; Chinese queries use FTS5 MATCH. Falls back to Chinese search if English search finds nothing.
 
 Displays pronunciation (parsed from JSON) inline on the word line with dimmed `/` delimiters, alongside definitions, synonyms, and antonyms from both dictionaries. Extra notes (`[用法]`, `[名言]`, `[释义补充]`, `[注]`) are displayed with the label on its own line followed by content without indentation. Records lookup history in `~/.ecd_lookup.db` (separate from the stateless `ecd.db`) — upserts the queried word with count + last-query timestamp on any result-bearing query (exact match, prefix match with single result, Chinese FTS5 hit). "Did you mean" suggestions are not recorded.
 

@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: ecd-extract
+Version: 1.0.0
+Summary: Build ecd.db from Apple Dictionary bundles
+Requires-Python: >=3.11
+Requires-Dist: pyglossary>=4.0.0
+Requires-Dist: lxml>=5.0.0
+Requires-Dist: cssselect>=1.2.0
+Requires-Dist: biplist>=1.0.0

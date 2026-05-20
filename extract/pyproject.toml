@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecd-extract"
+version = "1.0.0"
+description = "Build ecd.db from Apple Dictionary bundles"
+requires-python = ">=3.11"
+dependencies = [
+    "pyglossary>=4.0.0",
+    "lxml>=5.0.0",
+    "cssselect>=1.2.0",
+    "biplist>=1.0.0",
+]
+
+[project.scripts]
+ecd-build = "ecd_extract.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ecd_extract*"]
