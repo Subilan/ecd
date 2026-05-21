@@ -5,9 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Subilan/ecd/internal/ai"
+	"github.com/Subilan/ecd/internal/config"
 	"github.com/Subilan/ecd/internal/dict"
 	"github.com/Subilan/ecd/internal/history"
 	"github.com/Subilan/ecd/internal/i18n"
+	"github.com/Subilan/ecd/internal/render"
 	"github.com/Subilan/ecd/internal/search"
 	"github.com/Subilan/ecd/internal/sm2"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -38,6 +41,13 @@ type Model struct {
 	review  reviewModel
 	deck    deckModel
 	help    helpModel
+	ai      ai.AIModel
+
+	// AI config (pointer for mutation during /init)
+	aiCfg *config.AIConfig
+
+	// AI init form
+	aiInit ai.InitModel
 
 	// Context for search operations
 	searchCtx *search.Context
@@ -56,11 +66,11 @@ func (m *Model) statusTimerCmd() tea.Cmd {
 }
 
 // NewModel creates the main TUI model.
-func NewModel(dictDB *dict.DB, historyDB *history.DB) Model {
+func NewModel(dictDB *dict.DB, historyDB *history.DB, aiCfg *config.AIConfig) Model {
 	var lastWord string
 
 	sm := newSearchModel()
-	sm.input.Focus()
+	sm.Input.Focus()
 
 	return Model{
 		state:     StateSearch,
@@ -72,12 +82,19 @@ func NewModel(dictDB *dict.DB, historyDB *history.DB) Model {
 		review:    newReviewModel(),
 		deck:      newDeckModel(),
 		help:      newHelpModel(),
+		ai:        ai.NewAIModel(aiCfg),
+		aiCfg:     aiCfg,
 		searchCtx: &search.Context{
 			DictDB:    dictDB,
 			HistoryDB: historyDB,
 			LastWord:  &lastWord,
 		},
 	}
+}
+
+// SetState sets the initial app state (used before program starts).
+func (m *Model) SetState(s AppState) {
+	m.state = s
 }
 
 func (m Model) Init() tea.Cmd {
@@ -104,6 +121,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search, _ = m.search.Update(msg)
 		m.detail, _ = m.detail.Update(msg)
 		m.review, _ = m.review.Update(msg)
+		m.ai, _ = m.ai.Update(msg)
 		if m.state == StateHelp {
 			m.help.setContent(msg.Width, msg.Height)
 		}
@@ -131,12 +149,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q":
 				m.state = StateSearch
 				m.search.restoreScrollPos()
-				m.search.input.Focus()
+				m.search.Input.Focus()
 				return m, nil
 			default:
 				m.state = StateSearch
 				m.search.restoreScrollPos()
-				m.search.input.Focus()
+				m.search.Input.Focus()
 				return m, nil
 			}
 
@@ -149,12 +167,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q":
 				m.state = StateSearch
 				m.search.restoreScrollPos()
-				m.search.input.Focus()
+				m.search.Input.Focus()
 				return m, nil
 			default:
 				m.state = StateSearch
 				m.search.restoreScrollPos()
-				m.search.input.Focus()
+				m.search.Input.Focus()
 				return m, nil
 			}
 
@@ -165,9 +183,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if msg.String() == "enter" {
-				query := strings.TrimSpace(m.search.input.Value())
+				query := strings.TrimSpace(m.search.Input.Value())
 				if strings.HasPrefix(query, "/") {
-					m.search.input.SetValue("")
+					m.search.Input.SetValue("")
 					return m.handleSlashCommand(query)
 				}
 			}
@@ -178,7 +196,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case StateReview:
 			return m.updateReview(msg)
+
+		case StateAI:
+			return m.updateAI(msg)
+
+		case StateAIInit:
+			return m.updateAIInit(msg)
 		}
+
+	case ai.AIResultMsg:
+		if m.state == StateAIInit {
+			var cmd tea.Cmd
+			m.aiInit, cmd = m.aiInit.Update(msg)
+			return m, cmd
+		}
+		var cmd tea.Cmd
+		m.ai, cmd = m.ai.Update(msg)
+		return m, cmd
+
+	case ai.TransitionToSearchMsg:
+		m.state = StateSearch
+		m.search.restoreScrollPos()
+		m.search.Input.Focus()
+		return m, nil
+
+	case ai.TransitionToAIMsg:
+		m.state = StateAI
+		return m, nil
+
+	case ai.EnterInitMsg:
+		m.aiInit = ai.NewInitModel(m.aiCfg)
+		// Immediately deliver window size so the form doesn't show "Initializing..."
+		m.aiInit, _ = m.aiInit.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		m.state = StateAIInit
+		return m, m.aiInit.Init()
+
+	case ai.SaveAndCloseMsg:
+		// Persist config to file
+		if err := config.SaveConfig(&config.Config{
+			DBPath:   config.DBPath,
+			LookupDB: config.HistoryDB,
+			AI:       *m.aiCfg,
+		}); err != nil {
+			return m, m.setStatus(i18n.T("ai.err_save_config", err.Error()))
+		}
+		m.ai.SetConfig(m.aiCfg)
+		m.state = StateAI
+		return m, m.setStatus(i18n.T("ai.config_saved"))
 
 	case searchDoneMsg:
 		if msg.result.Entries != nil {
@@ -200,8 +264,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}}
 		}
 		m.search.loading = false
-		m.search.viewport.SetContent(m.search.renderResults())
-		m.search.viewport.GotoTop()
+		m.search.Viewport.SetContent(m.search.renderResults())
+		m.search.Viewport.GotoTop()
 
 		// Auto-add
 		if m.autoAdd && *m.searchCtx.LastWord != "" {
@@ -223,6 +287,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			return m, cmd
 		}
+	case StateAI:
+		var cmd tea.Cmd
+		m.ai, cmd = m.ai.Update(msg)
+		if cmd != nil {
+			return m, cmd
+		}
+	case StateAIInit:
+		var cmd tea.Cmd
+		m.aiInit, cmd = m.aiInit.Update(msg)
+		if cmd != nil {
+			return m, cmd
+		}
 	}
 
 	return m, nil
@@ -231,13 +307,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ESC clears input
 	if msg.String() == "esc" {
-		m.search.input.SetValue("")
+		m.search.Input.SetValue("")
 		return m, nil
 	}
 
 	// Enter: process input (command or search)
 	if msg.String() == "enter" {
-		query := strings.TrimSpace(m.search.input.Value())
+		query := strings.TrimSpace(m.search.Input.Value())
 		if query == "" {
 			return m, nil
 		}
@@ -250,7 +326,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Regular search — clear input after submit
 		m.statusMsg = ""
 		m.search.addHistory(query)
-		m.search.input.SetValue("")
+		m.search.Input.SetValue("")
 		return m, m.doSearch(query, nil)
 	}
 
@@ -271,7 +347,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		arg = strings.Join(parts[1:], " ")
 	}
 
-	m.search.input.SetValue("")
+	m.search.Input.SetValue("")
 	m.statusMsg = ""
 
 	switch cmdName {
@@ -330,8 +406,8 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.search.results = items
-		m.search.viewport.SetContent(m.search.renderResults())
-		m.search.viewport.GotoTop()
+		m.search.Viewport.SetContent(m.search.renderResults())
+		m.search.Viewport.GotoTop()
 
 	case "/ant":
 		word := arg
@@ -366,8 +442,8 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.search.results = items
-		m.search.viewport.SetContent(m.search.renderResults())
-		m.search.viewport.GotoTop()
+		m.search.Viewport.SetContent(m.search.renderResults())
+		m.search.Viewport.GotoTop()
 
 	case "/idm":
 		word := arg
@@ -399,8 +475,13 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 			})
 		}
 		m.search.results = items
-		m.search.viewport.SetContent(m.search.renderResults())
-		m.search.viewport.GotoTop()
+		m.search.Viewport.SetContent(m.search.renderResults())
+		m.search.Viewport.GotoTop()
+
+	case "/ai":
+		m.state = StateAI
+		m.search.Input.SetValue("")
+		return m, m.ai.Init()
 
 	case "/add":
 		word := arg
@@ -455,7 +536,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 
 	case "/reset":
 		m.state = StateConfirmReset
-		m.search.input.SetValue("")
+		m.search.Input.SetValue("")
 
 	case "/reset-confirm":
 		if m.state == StateConfirmReset {
@@ -468,7 +549,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 	case "/random":
 		word, err := m.DictDB.RandomWord(nil)
 		if err == nil && word != "" {
-			m.search.input.SetValue(word)
+			m.search.Input.SetValue(word)
 			return m, m.doSearch(word, nil)
 		}
 		return m, m.setStatus(i18n.T("search.no_words"))
@@ -489,7 +570,7 @@ func (m Model) updateReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() != "" {
 			m.state = StateSearch
 			m.search.restoreScrollPos()
-			m.search.input.Focus()
+			m.search.Input.Focus()
 			return m, m.setStatus(fmt.Sprintf(i18n.T("review.complete"), len(m.review.cards)))
 		}
 	case reviewFront, reviewBack:
@@ -502,6 +583,25 @@ func (m Model) updateReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) setStatus(msg string) tea.Cmd {
 	m.statusMsg = msg
 	return m.statusTimerCmd()
+}
+
+func (m Model) updateAI(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.state = StateSearch
+		m.search.restoreScrollPos()
+		m.search.Input.Focus()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.ai, cmd = m.ai.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateAIInit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.aiInit, cmd = m.aiInit.Update(msg)
+	return m, cmd
 }
 
 // ---- View ----
@@ -528,6 +628,10 @@ func (m Model) View() string {
 		content = m.help.View()
 	case StateConfirmReset:
 		content = m.confirmResetView()
+	case StateAI:
+		return m.ai.View()
+	case StateAIInit:
+		return m.aiInitView()
 	default:
 		content = ""
 	}
@@ -562,6 +666,10 @@ func (m Model) confirmResetView() string {
 			"  /reset-confirm  — " + DimStyle.Render("confirm and delete all cards") + "\n" +
 			"  Esc            — " + DimStyle.Render("cancel"),
 	)
+}
+
+func (m Model) aiInitView() string {
+	return m.aiInit.View()
 }
 
 // ---- Commands ----
@@ -812,7 +920,7 @@ func (m reviewModel) View() string {
 		b.WriteString(DimStyle.Render(i18n.T("common.press_any_key")))
 	}
 
-	m.viewport.SetContent(wrapContent(b.String(), m.viewport.Width))
+	m.viewport.SetContent(render.WrapContent(b.String(), m.viewport.Width))
 	return m.viewport.View()
 }
 
@@ -963,25 +1071,6 @@ func (m *Model) flashcardStatusesForChinese(results []dict.ChineseResult) map[st
 	return m.HistoryDB.GetFlashcardStatuses(words)
 }
 
-// wrapContent wraps long lines in text to fit within the given width.
-// CJK text is wrapped at character boundaries. ANSI escape codes are preserved.
-func wrapContent(text string, width int) string {
-	if width <= 0 {
-		return text
-	}
-	lines := strings.Split(text, "\n")
-	var result []string
-	for _, line := range lines {
-		if lipgloss.Width(line) <= width {
-			result = append(result, line)
-		} else {
-			wrapped := lipgloss.NewStyle().Width(width).Render(line)
-			result = append(result, strings.Split(strings.TrimRight(wrapped, " "), "\n")...)
-		}
-	}
-	return strings.Join(result, "\n")
-}
-
 // ---- Help Model ----
 
 type helpModel struct {
@@ -1003,6 +1092,7 @@ func (m *helpModel) setContent(width, height int) {
 		"    " + i18n.T("help.item_syn"),
 		"    " + i18n.T("help.item_ant"),
 		"    " + i18n.T("help.item_idm"),
+			"    " + i18n.T("help.item_ai"),
 		"",
 		"  " + LabelStyle.Render(i18n.T("help.section_flashcards")),
 		"    " + i18n.T("help.item_add"),

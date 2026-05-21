@@ -5,6 +5,8 @@ import (
 
 	"github.com/Subilan/ecd/internal/dict"
 	"github.com/Subilan/ecd/internal/i18n"
+	"github.com/Subilan/ecd/internal/render"
+	"github.com/Subilan/ecd/internal/repl"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -13,14 +15,11 @@ import (
 )
 
 type searchModel struct {
-	input        textinput.Model
-	viewport     viewport.Model
+	repl.Base
 	results      []searchResultItem
 	query        string
 	loading      bool
 	err          string
-	width        int
-	height       int
 	savedYOffset int
 
 	history      []string // search history ring buffer
@@ -58,14 +57,9 @@ func newSearchModel() searchModel {
 	}
 
 	return searchModel{
-		input:      ti,
-		viewport:   vp,
+		Base:       repl.NewBase(ti, vp),
 		focusInput: true,
 	}
-}
-
-func (m searchModel) Init() tea.Cmd {
-	return textinput.Blink
 }
 
 func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
@@ -73,22 +67,18 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.input.Width = max(1, msg.Width-4)
-		m.viewport.Width = max(1, msg.Width-2)
-		m.viewport.Height = max(1, msg.Height-7)
+		m.Base.HandleWindowSizeMsg(msg)
 		if len(m.results) > 0 {
-			m.viewport.SetContent(m.renderResults())
+			m.Viewport.SetContent(m.renderResults())
 		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			m.input.SetValue("")
+			m.Input.SetValue("")
 			m.query = ""
 			m.results = nil
-			m.viewport.SetContent("")
+			m.Viewport.SetContent("")
 			return m, nil
 
 		case "tab":
@@ -99,7 +89,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 			if m.focusInput {
 				m.historyUp()
 			} else {
-				m.viewport.ScrollUp(1)
+				m.Viewport.ScrollUp(1)
 			}
 			return m, nil
 
@@ -107,7 +97,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 			if m.focusInput {
 				m.historyDown()
 			} else {
-				m.viewport.ScrollDown(1)
+				m.Viewport.ScrollDown(1)
 			}
 			return m, nil
 		}
@@ -115,10 +105,10 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 	// Handle input changes
 	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	m.Input, cmd = m.Input.Update(msg)
 	cmds = append(cmds, cmd)
 
-	newQuery := strings.TrimSpace(m.input.Value())
+	newQuery := strings.TrimSpace(m.Input.Value())
 	if newQuery != m.query {
 		m.query = newQuery
 		// If the query no longer matches the history entry at the current
@@ -129,7 +119,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 		}
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.Viewport, cmd = m.Viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
@@ -138,7 +128,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 func (m searchModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(m.input.View())
+	b.WriteString(m.Input.View())
 	b.WriteString("\n")
 
 	if m.loading {
@@ -146,7 +136,7 @@ func (m searchModel) View() string {
 	} else if m.err != "" {
 		b.WriteString(WarnStyle.Render("  " + m.err))
 	} else {
-		b.WriteString(m.viewport.View())
+		b.WriteString(m.Viewport.View())
 	}
 
 	return b.String()
@@ -179,7 +169,7 @@ func (m *searchModel) renderResults() string {
 		}
 		b.WriteString("\n")
 	}
-	return wrapContent(b.String(), m.viewport.Width)
+	return render.WrapContent(b.String(), m.Viewport.Width)
 }
 
 // bracketFor returns the bracket style for a word based on its flashcard status.
@@ -283,11 +273,11 @@ func buildSearchItems(entries []dict.Entry, statuses map[string]string) []search
 }
 
 func (m *searchModel) saveScrollPos() {
-	m.savedYOffset = m.viewport.YOffset
+	m.savedYOffset = m.Viewport.YOffset
 }
 
 func (m *searchModel) restoreScrollPos() {
-	m.viewport.SetYOffset(m.savedYOffset)
+	m.Viewport.SetYOffset(m.savedYOffset)
 }
 
 const maxHistory = 100
@@ -313,13 +303,13 @@ func (m *searchModel) historyUp() {
 		return
 	}
 	if m.historyIdx == -1 {
-		m.historySaved = m.input.Value()
+		m.historySaved = m.Input.Value()
 		m.historyIdx = len(m.history) - 1
 	} else if m.historyIdx > 0 {
 		m.historyIdx--
 	}
-	m.input.SetValue(m.history[m.historyIdx])
-	m.input.CursorEnd()
+	m.Input.SetValue(m.history[m.historyIdx])
+	m.Input.CursorEnd()
 }
 
 func (m *searchModel) historyDown() {
@@ -328,11 +318,11 @@ func (m *searchModel) historyDown() {
 	}
 	if m.historyIdx < len(m.history)-1 {
 		m.historyIdx++
-		m.input.SetValue(m.history[m.historyIdx])
-		m.input.CursorEnd()
+		m.Input.SetValue(m.history[m.historyIdx])
+		m.Input.CursorEnd()
 	} else {
 		m.historyIdx = -1
-		m.input.SetValue(m.historySaved)
+		m.Input.SetValue(m.historySaved)
 		m.historySaved = ""
 	}
 }

@@ -32,6 +32,7 @@ type args struct {
 	Query      string
 	ConfigPath string
 	Idm        string
+	AiMode     bool
 }
 
 func parseArgs() args {
@@ -52,6 +53,8 @@ func parseArgs() args {
 			}
 		case "--no-color":
 			a.NoColor = true
+		case "--ai":
+			a.AiMode = true
 		case "--config":
 			if i+1 < len(os.Args) {
 				a.ConfigPath = os.Args[i+1]
@@ -143,11 +146,17 @@ func run(a args) error {
 
 	default:
 		if isatty.IsTerminal(os.Stdin.Fd()) {
-			model := tui.NewModel(dictDB, historyDB)
+			model := tui.NewModel(dictDB, historyDB, &cfg.AI)
+			if a.AiMode {
+				model.SetState(tui.StateAI)
+			}
 			p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 			if _, err := p.Run(); err != nil {
 				return err
 			}
+		} else if a.AiMode {
+			fmt.Fprintf(os.Stderr, "AI mode requires a terminal (TTY).\n")
+			return nil
 		} else {
 			scanner := bufio.NewScanner(os.Stdin)
 			for scanner.Scan() {

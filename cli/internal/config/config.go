@@ -24,8 +24,22 @@ var LoadedPath string
 
 // Config holds the configuration fields.
 type Config struct {
-	DBPath   string `toml:"db_path"`
-	LookupDB string `toml:"lookup_db"`
+	DBPath   string   `toml:"db_path"`
+	LookupDB string   `toml:"lookup_db"`
+	AI       AIConfig `toml:"ai"`
+}
+
+// AIConfig holds AI feature configuration.
+type AIConfig struct {
+	APIKey       string `toml:"api_key"`
+	BaseURL      string `toml:"base_url"`
+	Model        string `toml:"model"`
+	CacheEnabled bool   `toml:"cache_enabled"`
+}
+
+// IsConfigured returns true if AI is ready to use.
+func (c AIConfig) IsConfigured() bool {
+	return c.APIKey != ""
 }
 
 var cjkRE = regexp.MustCompile(`[\x{4e00}-\x{9fff}\x{3400}-\x{4dbf}\x{f900}-\x{faff}]`)

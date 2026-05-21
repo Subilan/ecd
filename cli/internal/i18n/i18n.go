@@ -137,7 +137,71 @@ var table = map[string]stringEntry{
 	"common.initializing":       {LangEN: "Initializing...", LangZH: "初始化中…"},
 	"common.search_placeholder": {LangEN: "Search English or Chinese...", LangZH: "输入英文或中文进行查询…"},
 	"interactive.lang_usage":    {LangEN: "Usage: /lang en|zh  (current: %s)", LangZH: "用法：/lang en|zh  (当前：%s)"},
-}
+
+		// AI mode
+		"ai.placeholder":      {LangEN: "/ AI command", LangZH: "/ AI 命令"},
+		"ai.waiting":          {LangEN: "Waiting for AI...", LangZH: "等待 AI 响应…"},
+		"ai.hint":             {LangEN: "Type /help for available AI commands, /back to return.", LangZH: "输入 /help 查看 AI 命令，/back 返回。"},
+		"ai.footer":           {LangEN: "/back to return, /help for help", LangZH: "/back 返回，/help 查看帮助"},
+		"ai.not_a_command":    {LangEN: "AI mode uses / commands. Type /help to list them.", LangZH: "AI 模式使用 / 命令。输入 /help 查看列表。"},
+		"ai.unknown_cmd":      {LangEN: "Unknown AI command: %s", LangZH: "未知 AI 命令：%s"},
+		"ai.err_no_config":    {LangEN: "AI not configured. Use /init in AI mode to set up API key.", LangZH: "AI 未配置。请在 AI 模式下使用 /init 设置 API 密钥。"},
+		"ai.err_need_init":    {LangEN: "AI not configured. Run /init first.", LangZH: "AI 未配置。请先运行 /init。"},
+		"ai.footer_no_config": {LangEN: "[run /init to configure]", LangZH: "[运行 /init 进行配置]"},
+		"ai.err_invalid_word": {LangEN: "Only alphabetic characters allowed: %s", LangZH: "只允许使用字母字符：%s"},
+		"ai.err_too_many":     {LangEN: "At most 5 words for comparison. Got %d.", LangZH: "最多比较 5 个单词。当前 %d 个。"},
+		"ai.err_missing_word": {LangEN: "No word specified. Usage: %s <word>", LangZH: "未指定单词。用法：%s <单词>"},
+		"ai.err_save_config":  {LangEN: "Failed to save config: %s", LangZH: "保存配置失败：%s"},
+		"ai.cached_hint":      {LangEN: "(cached)", LangZH: "（缓存）"},
+		"ai.invalid_request":  {LangEN: "Invalid request", LangZH: "无效请求"},
+		"ai.config_saved":     {LangEN: "Configuration saved.", LangZH: "配置已保存。"},
+		"ai.config_test_ok":   {LangEN: "Connection successful!", LangZH: "连接成功！"},
+		"ai.cache_on":         {LangEN: "AI cache enabled.", LangZH: "AI 缓存已开启。"},
+		"ai.cache_off":        {LangEN: "AI cache disabled.", LangZH: "AI 缓存已关闭。"},
+		"ai.cache_status":     {LangEN: "AI cache: %s", LangZH: "AI 缓存：%s"},
+
+		// AI init flow
+		"ai.init_title":       {LangEN: "AI Configuration", LangZH: "AI 配置"},
+		"ai.init_label_key":   {LangEN: "API Key:", LangZH: "API 密钥："},
+		"ai.init_label_url":   {LangEN: "Base URL:", LangZH: "Base URL："},
+		"ai.init_label_model": {LangEN: "Model:", LangZH: "模型："},
+		"ai.init_footer_line":    {LangEN: "Esc to exit without saving, Enter to save and exit", LangZH: "Esc 不保存退出，Enter 保存并退出"},
+	"ai.testing_connection":  {LangEN: "Testing connection...", LangZH: "正在测试连接…"},
+		"ai.err_api_key_empty":   {LangEN: "API key cannot be empty", LangZH: "API 密钥不能为空"},
+		"ai.err_base_url_empty":  {LangEN: "Base URL cannot be empty", LangZH: "Base URL 不能为空"},
+		"ai.err_model_empty":     {LangEN: "Model cannot be empty", LangZH: "模型不能为空"},
+		"ai.empty":            {LangEN: "empty", LangZH: "空"},
+		"ai.init_pick_model":  {LangEN: "Select Model", LangZH: "选择模型"},
+		"ai.loading_models":   {LangEN: "Loading models...", LangZH: "正在加载模型列表…"},
+		"ai.model_pending":    {LangEN: "Pending", LangZH: "待获取"},
+		"ai.no_models":        {LangEN: "No models found. You can type a custom model name.", LangZH: "未找到模型。你可以输入自定义模型名称。"},
+		"ai.custom_model":     {LangEN: "custom...", LangZH: "自定义…"},
+		"ai.init_pick_hint":   {LangEN: "Space: select  |  Enter: confirm  |  Esc: back", LangZH: "空格：选择  |  Enter：确认  |  Esc：返回"},
+
+		// AI output labels
+		"ai.label.explanation":     {LangEN: "Explanation", LangZH: "解释"},
+		"ai.label.examples":        {LangEN: "Examples", LangZH: "例句"},
+		"ai.label.definition":      {LangEN: "Definition", LangZH: "释义"},
+		"ai.label.etymology":       {LangEN: "Etymology", LangZH: "词源"},
+		"ai.label.usage_notes":     {LangEN: "Usage", LangZH: "用法说明"},
+
+		// AI help
+		"ai.help_header":     {LangEN: "AI Commands:", LangZH: "AI 命令："},
+		"ai.help_back":       {LangEN: "Return to dictionary search mode", LangZH: "返回词典搜索模式"},
+		"ai.help_init":       {LangEN: "Configure API key, base URL, model", LangZH: "配置 API 密钥、base URL、模型"},
+		"ai.help_cache":      {LangEN: "Toggle AI cache", LangZH: "切换 AI 缓存"},
+		"ai.help_diff":       {LangEN: "Explain differences between words", LangZH: "解释单词间的区别"},
+		"ai.help_ant":        {LangEN: "Generate antonyms", LangZH: "生成反义词"},
+		"ai.help_syn":        {LangEN: "Generate synonyms", LangZH: "生成同义词"},
+		"ai.help_phr":        {LangEN: "Generate phrases", LangZH: "生成短语"},
+		"ai.help_example":    {LangEN: "Generate example sentences", LangZH: "生成例句"},
+		"ai.help_explain":    {LangEN: "Detailed word explanation", LangZH: "详细单词解释"},
+		"ai.help_help":       {LangEN: "Show this help", LangZH: "显示帮助"},
+		"ai.help_cache_hint": {LangEN: "Append ! to bypass cache (e.g., /syn! <word>)", LangZH: "添加 ! 跳过缓存（如 /syn! <单词>）"},
+
+		// Help item for /ai
+		"help.item_ai": {LangEN: "/ai                   AI-powered dictionary assistant", LangZH: "/ai                   AI 词典助手"},
+	}
 
 func T(key string, args ...interface{}) string {
 	return TWithLang(currentLang, key, args...)
