@@ -790,7 +790,7 @@ func (m reviewModel) View() string {
 		b.WriteString(DimStyle.Render(i18n.T("common.press_any_key")))
 	}
 
-	m.viewport.SetContent(b.String())
+	m.viewport.SetContent(wrapContent(b.String(), m.viewport.Width))
 	return m.viewport.View()
 }
 
@@ -939,6 +939,25 @@ func (m *Model) flashcardStatusesForChinese(results []dict.ChineseResult) map[st
 		return nil
 	}
 	return m.HistoryDB.GetFlashcardStatuses(words)
+}
+
+// wrapContent wraps long lines in text to fit within the given width.
+// CJK text is wrapped at character boundaries. ANSI escape codes are preserved.
+func wrapContent(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	var result []string
+	for _, line := range lines {
+		if lipgloss.Width(line) <= width {
+			result = append(result, line)
+		} else {
+			wrapped := lipgloss.NewStyle().Width(width).Render(line)
+			result = append(result, strings.Split(strings.TrimRight(wrapped, " "), "\n")...)
+		}
+	}
+	return strings.Join(result, "\n")
 }
 
 // ---- Help Model ----

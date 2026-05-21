@@ -78,6 +78,9 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 		m.input.Width = max(1, msg.Width-4)
 		m.viewport.Width = max(1, msg.Width-2)
 		m.viewport.Height = max(1, msg.Height-7)
+		if len(m.results) > 0 {
+			m.viewport.SetContent(m.renderResults())
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -176,7 +179,7 @@ func (m *searchModel) renderResults() string {
 		}
 		b.WriteString("\n")
 	}
-	return b.String()
+	return wrapContent(b.String(), m.viewport.Width)
 }
 
 // bracketFor returns the bracket style for a word based on its flashcard status.
