@@ -6,7 +6,7 @@ HTML 解析中遇到的主要边界情况及其处理方式。
 |------|----------|
 | Oxford 空 `p-g` 块（无 pos、无 n-g） | 跳过该块 |
 | Oxford 模式 4：`def-g` 直接位于 `h-g` 下（无 `p-g`/`n-g`） | `_oxford_parse_hg_direct()` 处理——POS 取自 `top-g > block-g > pos`，语法取自 `top-g > .gr`。示例来自 `h-g` 中的兄弟 `.x-g` |
-| Oxford 模式 4b：`h-g` 下的 `ids-g` 习语 | 每个 `id-g > sense-g` 作为独立条目，POS 为 `IDM <短语>` |
+| Oxford 模式 4b：`h-g` 下的 `ids-g` 习语 | 提取到 `oxford_idioms` 表，通过 `/idm <word>` 查询 |
 | Oxford 派生形式交叉引用（`.entry > .derived`，如 "abasement"） | 按交叉引用处理——`cn_definition` 取自 `.de_e`/`.de_c`，`cross_ref` 取自 `<a>` 链接 |
 | Oxford 延伸条目：含 `.derived` 但同时有 `.n-g` 内容（如 "radically"） | 按普通条目处理（模式 2）。若无 `.block-g`，POS 回退到 `.top-g > .pos-g .pos`。有例句但无释义的条目通过过滤 |
 | Oxford 情态动词（`must`）——`span.pos` 在 `p-g` 外 | 在条目级而非 `p-g` 内检查 `block-g > pos-g > pos` |

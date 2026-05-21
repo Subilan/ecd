@@ -22,6 +22,7 @@ ecd.db (只读, ~80MB)              ~/.ecd_lookup.db (读写)
 │ oxford_examples     │                  ▲
 │ entries_fts (FTS5)  │                  │
 │ synonyms / antonyms │                  │
+│ oxford_idioms       │                  │
 └─────────────────────┘                  │
          ▲                               │
          │     ┌──────────────┐          │
@@ -52,11 +53,12 @@ ecd.db (只读, ~80MB)              ~/.ecd_lookup.db (读写)
 - SQLite 驱动注册（`modernc.org/sqlite`，无 CGO）
 
 ### `dict/`
-- `models.go`：核心数据结构 — `Entry`（义项）、`Example`（例句对）、`Note`（额外注释，JSON）、`ChineseResult`（FTS5 聚合结果）
+- `models.go`：核心数据结构 — `Entry`（义项）、`Example`（例句对）、`Note`（额外注释，JSON）、`Idiom`（牛津习语）、`ChineseResult`（FTS5 聚合结果）
 - `db.go`：`DB` 封装只读 SQLite 连接，提供：
   - `SearchExact` / `SearchPrefix` — `COLLATE NOCASE` 精确/前缀匹配
   - `SearchFuzzy` — 首字母索引 + bigram 相似度（≥0.75），最多返回 5 个结果
   - `SearchChinese` — FTS5 MATCH，按 rank 排序，最多 50 条，按 `(source, word, cn_definition)` 去重
+  - `GetIdioms` — 查询 `oxford_idioms` 表，按 word 检索习语
   - `RandomWord` — `ORDER BY RANDOM()` 随机取词
 - 每次查询同时从 `collins` 和 `oxford` 两表 UNION 风格拉取，逐条附带例句、同义词、反义词
 

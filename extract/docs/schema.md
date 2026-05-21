@@ -8,12 +8,12 @@
 |--------|------|----------|-------------|
 | `id` | INTEGER PK | — | 自增 ID |
 | `word` | TEXT | NOT NULL | 词头，如 `"abject"`、`"water"`、`"went"` |
-| `pos` | TEXT | NULLABLE | 词性。Collins: `"N-COUNT"`、`"ADJ-GRADED"`、`"VERB"`；Oxford: `"noun [U]"`、`"verb [I]"`、`"IDM phrase"`。纯交叉引用条目为 NULL |
+| `pos` | TEXT | NOT NULL DEFAULT '' | 词性。Collins: `"N-COUNT"`、`"ADJ-GRADED"`、`"VERB"`；Oxford: `"noun [U]"`、`"verb [I]"` 等。纯交叉引用条目为空字符串 |
 | `cn_definition` | TEXT | NULLABLE | 中文释义。交叉引用条目存储描述文本（如 `"past tense of go"`） |
 | `cross_ref` | TEXT | NULLABLE | 交叉引用目标词。Oxford 从 `xr-g > xr` 的 `<a>` 提取；Collins 从 `<a class="see">` 或 caption 文本提取。普通条目为 NULL |
 | `sense_order` | INTEGER | NOT NULL DEFAULT 1 | 同一 (word, pos) 组内的序号，从 1 开始。交叉引用条目固定为 1 |
 | `pronunciation` | TEXT | NULLABLE | JSON 数组格式的 IPA 字符串，如 `["rɪˈfjuːz"]` 或 `["ˈrekɔːd","ˈrekərd"]`（UK+US）。不同 POS 的发音通过各自的 `pos` 字段区分 |
-| `extra_notes` | TEXT | NULLABLE | JSON 数组 `{"type": "...", "en": "...", "cn": "..."}`。Collins 从 `<figure class="note type-*">` 提取。Oxford 保留字段 |
+| `extra_notes` | TEXT | NULLABLE | JSON 数组 `{"type": "...", "en": "...", "cn": "..."}`。Collins 从 `<figure class="note type-*">` 提取。Oxford 条目不使用此字段 |
 
 **约束与索引：**
 - `UNIQUE (word, pos, sense_order)` — 覆盖主要查询模式的复合唯一约束
@@ -26,7 +26,7 @@
 
 ### 交叉引用处理
 
-约 14,700 条 Oxford 条目和 10,100 条 Collins 条目标纯交叉引用（如 "went" → "go"、"mice" → "mouse"）。这些条目 `pos = NULL`，`cn_definition` 为描述文本，`cross_ref` 为规范词，在 examples 表中无记录。
+约 14,700 条 Oxford 条目和 10,100 条 Collins 条目标纯交叉引用（如 "went" → "go"、"mice" → "mouse"）。这些条目 `pos = ''`，`cn_definition` 为描述文本，`cross_ref` 为规范词，在 examples 表中无记录。
 
 同时具有释义和交叉引用标签的混合条目（如 Oxford "better" 标注 "comparative of good" 但仍包含完整释义）按普通条目处理，即 `cross_ref = NULL`。
 
@@ -90,6 +90,21 @@ CREATE INDEX idx_antonyms_word ON antonyms(antonym_word);
 ```
 
 主要来自 Oxford 包含 `.symbols-oppsym`（OPP）标记的 `.xr-g` 元素。
+
+## `oxford_idioms`（牛津习语）
+
+```sql
+CREATE TABLE IF NOT EXISTS oxford_idioms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word TEXT NOT NULL,
+    idiom_phrase TEXT NOT NULL,
+    cn_definition TEXT,
+    examples TEXT  -- JSON array of [en, cn] pairs, nullable
+);
+CREATE INDEX idx_oxford_idioms_word ON oxford_idioms(word);
+```
+
+从 Oxford 的 `.ids-g`（idiom）块提取。每条记录为一个习语短语，`examples` 以 JSON 数组 `[["en1", "cn1"], ["en2", "cn2"]]` 格式存储例句对，可为 NULL。通过 `/idm` 命令查询。
 
 ## 分表设计的原因
 

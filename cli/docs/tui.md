@@ -21,6 +21,7 @@
                   │/del  │ │  │            │     │
                   │/syn  │ │  │┌──────────┐│     │
                   │/ant  │ │  ││reviewFront││     │
+                  │/idm  │ │  ││reviewFront││     │
                   │/random│ │  │└────┬─────┘│     │
                   │/lang  │ │  │     │Enter  │     │
                   └───────┘ │  │┌────▼─────┐│     │
@@ -109,6 +110,7 @@ Model (model.go)
 | `/reset` | 重置所有卡片（需 `/reset-confirm` 确认） |
 | `/syn [word]` | 显示同义词 |
 | `/ant [word]` | 显示反义词 |
+| `/idm <word>` | 显示牛津习语 |
 | `/random` | 随机单词 |
 | `/lang [en\|zh]` | 切换界面语言 |
 | `/exit` `/quit` `/q` | 退出 |

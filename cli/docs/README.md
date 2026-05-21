@@ -47,6 +47,7 @@ cd cli && go run .
 go run . hello              # 英→中
 go run . 水                 # 中→英 (FTS5)
 go run . -s oxford beauty   # 限定词典
+go run . -i suffice         # 牛津习语
 go run . -r                 # 随机单词
 echo hello | go run .       # 管道输入
 

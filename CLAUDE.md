@@ -20,9 +20,10 @@ extract/.venv/bin/ecd-build
 extract/.venv/bin/python -m ecd_extract --only oxford
 
 # Run the Go CLI
-make build                   # Produces ./ecd-go binary
-./ecd-go hello               # CLI mode — one-shot query
-./ecd-go                     # TUI mode — interactive interface
+make build                   # Produces ./ecd binary
+./ecd hello                  # CLI mode — one-shot query
+./ecd                        # TUI mode — interactive interface
+./ecd -i suffice             # Oxford idioms
 cd cli && go run .           # Dev: run from source
 ```
 

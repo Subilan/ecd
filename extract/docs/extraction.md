@@ -46,13 +46,13 @@ HTML 结构：`span.entry` → `span.p-g`（POS 组）→ `span.n-g`（义项组
 - **Pattern 1**（如 "water"）：`.entry` 下有 `.p-g` 块，每个 `.p-g` 包含 `.pos` + `.n-g` 子元素。`.n-g` 内含 `.gr` 标签和 `.x-g` 示例。
 - **Pattern 1b**（如 "cause" 的动词、 "above" 的形容词）：存在 `.p-g` 但 `.def-g` 和 `.x-g` 直接作为 `.p-g` 的子元素（无 `.n-g` 包裹）。语法信息来自 `.p-g` 的直接 `.gr` 子元素。
 - **Pattern 2**（如 "beauty"）：无 `.p-g`，`.n-g` 直接位于 `.h-g` 下，POS 从 `top-g > block-g > pos` 获取。延伸条目（如 "radically"）的 POS 回退到 `.top-g > .pos-g > .pos`。
-- **Pattern 4**（如 "incantation"、"A1"）：无 `.n-g`——`def-g` 直接位于 `.h-g` 下。POS 从 `top-g > block-g > pos` 获取，语法来自 `top-g > .gr`。子模式 4b：`ids-g` 习语，每个 `id-g > sense-g` 作为独立条目，POS 为 `IDM <短语>`。
+- **Pattern 4**（如 "incantation"、"A1"）：无 `.n-g`——`def-g` 直接位于 `.h-g` 下。POS 从 `top-g > block-g > pos` 获取，语法来自 `top-g > .gr`。子模式 4b：`ids-g` 习语，提取到独立的 `oxford_idioms` 表，通过 `/idm` 命令查询。
 
 POS 字符串构建规则因模式而异：
 - 模式 1/2：`_oxford_pos_for_ng()` 合并基础 POS span 与 `.n-g` 中的 `.gr` span
 - 模式 1b：`_oxford_parse_pg_direct()` 合并基础 POS span 与 `.p-g` 中的直接 `.gr` 子元素
 - 模式 4：`_oxford_make_pos()` 合并基础 POS span 与容器中的 `.gr` span
-- 模式 4b：POS 为 `"IDM <短语>"`，短语取自 `.id-g` 中的 `.id` 文本
+- 模式 4b：习语短语及中文释义提取到 `oxford_idioms` 表，不创建 `oxford_entries` 条目
 
 ### 发音
 
@@ -79,6 +79,10 @@ Oxford 条目在以下情况为纯交叉引用：
 3. **pos**：NULL
 4. **sense_order**：1
 
+### 中文释义提取
+
+`_oxford_extract_cn_def(def_g)` 辅助函数从 `def-g` 元素中提取中文释义，优先取 `.d`/`.ud`（实际释义）中的 `.oalecd8e_chn`，而非 `.label-g`（语法标注/用法说明）中的。这避免了将"不用于进行时"等用法说明误当作释义。
+
 ### 条目过滤
 
-两个解析器均跳过既无 `cn_definition` 也无 examples 的条目（词库内部噪音，如词库标题、"See also:" 链接、无中文翻译的缩写展开）。有例句但无中文释义的条目予以保留。
+两个解析器均跳过既无 `cn_definition` 也无 examples 的条目（词库内部噪音，如词库标题、"See also:" 链接、无中文翻译的缩写展开）。有例句但无中文释义的条目予以保留。仅含习语的单词（如 "aback"）会生成一条仅含词头与发音的最简条目，以确保可被常规搜索找到。
