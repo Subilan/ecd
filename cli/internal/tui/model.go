@@ -104,6 +104,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search, _ = m.search.Update(msg)
 		m.detail, _ = m.detail.Update(msg)
 		m.review, _ = m.review.Update(msg)
+		if m.state == StateHelp {
+			m.help.setContent(msg.Width, msg.Height)
+		}
 		return m, nil
 
 	case clearStatusMsg:
@@ -123,8 +126,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StateSearch:
 			return m.updateSearch(msg)
 
-		case StateEntryDetail, StateDeckStats, StateHelp:
+		case StateEntryDetail, StateDeckStats:
 			switch msg.String() {
+			case "esc", "q":
+				m.state = StateSearch
+				m.search.restoreScrollPos()
+				m.search.input.Focus()
+				return m, nil
+			default:
+				m.state = StateSearch
+				m.search.restoreScrollPos()
+				m.search.input.Focus()
+				return m, nil
+			}
+
+		case StateHelp:
+			switch msg.String() {
+			case "up", "down":
+				var cmd tea.Cmd
+				m.help, cmd = m.help.Update(msg)
+				return m, cmd
 			case "esc", "q":
 				m.state = StateSearch
 				m.search.restoreScrollPos()
@@ -259,6 +280,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 
 	case "/help":
 		m.state = StateHelp
+		m.help.setContent(m.width, m.height)
 
 	case "/lang":
 		switch strings.ToLower(arg) {
@@ -962,16 +984,14 @@ func wrapContent(text string, width int) string {
 
 // ---- Help Model ----
 
-type helpModel struct{}
-
-func newHelpModel() helpModel     { return helpModel{} }
-func (m helpModel) Init() tea.Cmd { return nil }
-
-func (m helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
-	return m, nil
+type helpModel struct {
+	viewport viewport.Model
+	ready    bool
 }
 
-func (m helpModel) View() string {
+func newHelpModel() helpModel { return helpModel{} }
+
+func (m *helpModel) setContent(width, height int) {
 	lines := []string{
 		"",
 		TitleStyle.Render("  " + i18n.T("help.title")),
@@ -1001,5 +1021,26 @@ func (m helpModel) View() string {
 		"",
 		DimStyle.Render("  " + i18n.T("common.press_any_key")),
 	}
-	return strings.Join(lines, "\n")
+	content := strings.Join(lines, "\n")
+
+	vpHeight := height - 2
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.viewport = viewport.New(width, vpHeight)
+	m.viewport.SetContent(content)
+	m.ready = true
+}
+
+func (m helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+func (m helpModel) View() string {
+	if !m.ready {
+		return ""
+	}
+	return m.viewport.View()
 }
