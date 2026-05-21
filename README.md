@@ -17,7 +17,11 @@ ecd 是一个在命令行中运行的英汉词典。
 ## 开始使用
 
 1. 从最新构建中下载二进制文件，复制到本地某个位置
-2. 获取词汇数据库 `ecd.db`（约 114MB），并放置在与二进制文件同目录下（也可以是不同目录，详见配置文件）
+   - [ecd-darwin-arm64 (Apple Silicon Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-amd64.zip)
+   - [ecd-darwin-amd64 (Intel Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-arm64.zip)
+   - [ecd-linux-amd64](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-linux-amd64.zip)
+   - [ecd-windows-amd64.exe](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-windows-amd64.exe.zip)
+2. 获取词汇数据库 `ecd.db`（~100MB），并放置在与二进制文件同目录下（也可以是不同目录，详见配置文件）
 
 > [!NOTE]
 > 词汇数据库可通过解压下载下来的 `ecd.db` 得到
@@ -72,23 +76,23 @@ ecd
 
 不带任何参数执行 ecd 可以进入交互模式，体验完整功能。交互模式下支持以下命令：
 
-| 命令                        | 说明                                                  |
-| --------------------------- | ----------------------------------------------------- |
-| `/add [word]`               | 将指定单词（或最近查询的单词）加入记忆卡片组          |
-| `/del <word>`               | 从卡片组中移除指定单词                                |
-| `/auto-add [on\|off]`       | 开启/关闭查词后自动加入卡片组。不带参数则切换开关状态 |
-| `/review`                   | 复习到期的记忆卡片                                    |
-| `/deck`                     | 查看卡片组统计                                        |
-| `/reset`                    | 清空所有卡片数据                                      |
-| `/syn [word]`               | 查询同义词                                            |
-| `/ant [word]`               | 查询反义词                                            |
-| `/idm [word]`               | 查询习语                                              |
-| `/lang [en\|zh]`            | 切换界面语言（只支持中文或英文）                      |
-| `/random`                   | 随机显示一个单词                                      |
-| `/help`                     | 显示帮助信息                                          |
-| `/exit` `/quit` `/q` Ctrl+C | 退出                                                  |
-| Esc                         | 清空输入框获返回搜索界面                              |
-| Tab                         | 切换页面滚动，用于浏览上下溢出的搜索结果              |
+| 命令                        | 说明                                            |
+| --------------------------- | ----------------------------------------------- |
+| `/add [word]`               | 将指定单词（或最近查询的单词）加入记忆卡片组    |
+| `/del <word>`               | 从卡片组中移除指定单词                          |
+| `/auto-add [on\|off]`       | 开启/关闭查词后自动加入卡片组。不带参数则为切换 |
+| `/review`                   | 复习到期的记忆卡片                              |
+| `/deck`                     | 查看卡片组统计                                  |
+| `/reset`                    | 清空所有卡片数据                                |
+| `/syn [word]`               | 查询同义词                                      |
+| `/ant [word]`               | 查询反义词                                      |
+| `/idm [word]`               | 查询习语                                        |
+| `/lang [en\|zh]`            | 切换界面语言（只支持中文或英文）                |
+| `/random`                   | 随机显示一个单词                                |
+| `/help`                     | 显示帮助信息                                    |
+| `/exit` `/quit` `/q` Ctrl+C | 退出                                            |
+| Esc                         | 清空输入框                                      |
+| Tab                         | 切换页面滚动，用于浏览上下溢出的搜索结果        |
 
 ## 记忆卡片
 
