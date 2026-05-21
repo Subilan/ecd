@@ -26,10 +26,11 @@ func main() {
 }
 
 type args struct {
-	Source  string
-	Random  bool
-	NoColor bool
-	Query   string
+	Source     string
+	Random     bool
+	NoColor    bool
+	Query      string
+	ConfigPath string
 }
 
 func parseArgs() args {
@@ -45,6 +46,11 @@ func parseArgs() args {
 			a.Random = true
 		case "--no-color":
 			a.NoColor = true
+		case "--config":
+			if i+1 < len(os.Args) {
+				a.ConfigPath = os.Args[i+1]
+				i++
+			}
 		default:
 			if !strings.HasPrefix(os.Args[i], "-") {
 				if a.Query != "" {
@@ -62,8 +68,28 @@ func run(a args) error {
 		cli.DisableColor()
 	}
 
-	if config.DBPath == "" {
-		return fmt.Errorf("dictionary database not found at ecd.db or ../ecd.db. Set ECD_DB_PATH.")
+	// Load config
+	configPath := a.ConfigPath
+	if configPath == "" {
+		configPath = "ecd.toml"
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	config.DBPath = cfg.DBPath
+	config.HistoryDB = cfg.LookupDB
+
+	// Validate dictionary DB
+	if err := config.ValidateDB(config.DBPath); err != nil {
+		isCLI := a.Random || a.Query != "" || !isatty.IsTerminal(os.Stdin.Fd())
+		if isCLI {
+			return fmt.Errorf("dictionary database not found at %s (configure with --config or edit %s)", config.DBPath, configPath)
+		}
+		// TUI mode — interactive prompt
+		promptForDB(cfg)
+		config.DBPath = cfg.DBPath
 	}
 
 	dictDB, err := dict.OpenDictDB()
@@ -120,6 +146,31 @@ func run(a args) error {
 		}
 	}
 	return nil
+}
+
+func promptForDB(cfg *config.Config) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Fprintf(os.Stderr, "Dictionary database (ecd.db) not found.\n")
+		fmt.Fprintf(os.Stderr, "Enter path to ecd.db: ")
+		if !scanner.Scan() {
+			fmt.Fprintln(os.Stderr, "\nExiting.")
+			os.Exit(1)
+		}
+		path := strings.TrimSpace(scanner.Text())
+		if path == "" {
+			continue
+		}
+		if err := config.ValidateDB(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Could not open database: %s\n\n", err)
+			continue
+		}
+		cfg.DBPath = path
+		if err := config.SaveConfig(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save config: %s\n", err)
+		}
+		return
+	}
 }
 
 func flashcardStatuses(ctx *search.Context, entries []dict.Entry, extra []string) map[string]string {

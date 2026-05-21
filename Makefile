@@ -1,14 +1,14 @@
 .PHONY: build run test clean
 
 build:
-	cd cli && go build -o ../ecd-go .
+	cd cli && go build -o ../ecd .
 
 run: build
-	./ecd-go
+	./ecd
 
 test:
 	cd cli && go vet ./...
 	cd cli && go test ./...
 
 clean:
-	rm -f ecd-go
+	rm -f ecd

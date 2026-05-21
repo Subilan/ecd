@@ -42,7 +42,7 @@ type searchResultItem struct {
 
 func newSearchModel() searchModel {
 	ti := textinput.New()
-	ti.Placeholder = "Search English or Chinese..."
+	ti.Placeholder = i18n.T("common.search_placeholder")
 	ti.CharLimit = 100
 	ti.Width = 50
 

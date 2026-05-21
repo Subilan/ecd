@@ -103,6 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.search, _ = m.search.Update(msg)
 		m.detail, _ = m.detail.Update(msg)
+		m.review, _ = m.review.Update(msg)
 		return m, nil
 
 	case clearStatusMsg:
@@ -270,7 +271,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 			m.lang = i18n.LangZH
 			m.statusMsg = i18n.T("interactive.lang_switched")
 		default:
-			m.statusMsg = fmt.Sprintf("Usage: /lang en|zh  (current: %s)", i18n.GetLang())
+			m.statusMsg = i18n.T("interactive.lang_usage", i18n.GetLang())
 		}
 		return m, m.statusTimerCmd()
 
@@ -295,7 +296,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		}
 		var items []searchResultItem
 		items = append(items, searchResultItem{
-			header: LabelStyle.Render(i18n.T("synonym.found", totalSyns)),
+			header: LabelStyle.Render(i18n.T("synonym.found", totalSyns, word)),
 		})
 		for _, sr := range synResults {
 			for _, s := range sr.Items {
@@ -331,7 +332,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		}
 		var items []searchResultItem
 		items = append(items, searchResultItem{
-			header: LabelStyle.Render(i18n.T("antonym.found", totalAnts)),
+			header: LabelStyle.Render(i18n.T("antonym.found", totalAnts, word)),
 		})
 		for _, ar := range antResults {
 			for _, a := range ar.Items {
@@ -452,7 +453,7 @@ func (m *Model) setStatus(msg string) tea.Cmd {
 
 func (m Model) View() string {
 	if !m.ready {
-		return "Initializing..."
+		return i18n.T("common.initializing")
 	}
 	if m.err != nil {
 		return WarnStyle.Render(fmt.Sprintf("Error: %s", m.err))
@@ -564,10 +565,13 @@ type reviewModel struct {
 	entries    []dict.Entry
 	entryIdx   int
 	button     int
+	viewport   viewport.Model
 }
 
 func newReviewModel() reviewModel {
-	return reviewModel{}
+	return reviewModel{
+		viewport: viewport.New(80, 20),
+	}
 }
 
 func (m *reviewModel) loadCurrentCard() {
@@ -584,12 +588,17 @@ func (m *reviewModel) Init() tea.Cmd { return nil }
 
 func (m reviewModel) Update(msg tea.Msg) (reviewModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.viewport.Width = max(1, msg.Width-2)
+		m.viewport.Height = max(1, msg.Height-2)
+
 	case tea.KeyMsg:
 		switch m.state {
 		case reviewFront:
 			if msg.String() == "enter" {
 				m.state = reviewBack
 			}
+			return m, nil
 
 		case reviewBack:
 			switch msg.String() {
@@ -597,10 +606,14 @@ func (m reviewModel) Update(msg tea.Msg) (reviewModel, tea.Cmd) {
 				if len(m.entries) > 0 {
 					m.entryIdx = (m.entryIdx - 1 + len(m.entries)) % len(m.entries)
 				}
+				m.viewport.GotoTop()
+				return m, nil
 			case "right":
 				if len(m.entries) > 0 {
 					m.entryIdx = (m.entryIdx + 1) % len(m.entries)
 				}
+				m.viewport.GotoTop()
+				return m, nil
 			case "0", "1", "2", "3":
 				m.button = int(msg.String()[0] - '0')
 				m.applyRating()
@@ -611,13 +624,18 @@ func (m reviewModel) Update(msg tea.Msg) (reviewModel, tea.Cmd) {
 					m.loadCurrentCard()
 					m.state = reviewFront
 				}
+				m.viewport.GotoTop()
+				return m, nil
 			}
 
 		case reviewComplete:
-			// Any key handled by parent
+			return m, nil
 		}
 	}
-	return m, nil
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
 }
 
 func (m *reviewModel) applyRating() {
@@ -647,7 +665,7 @@ func (m reviewModel) View() string {
 			return ""
 		}
 		card := m.cards[m.currentIdx]
-		b.WriteString("\n")
+
 		b.WriteString(TitleStyle.Render(
 			fmt.Sprintf(i18n.T("review.header_card"), m.currentIdx+1, len(m.cards))))
 		b.WriteString("\n\n")
@@ -669,7 +687,6 @@ func (m reviewModel) View() string {
 		}
 		card := m.cards[m.currentIdx]
 
-		b.WriteString("\n")
 		b.WriteString(TitleStyle.Render(
 			fmt.Sprintf(i18n.T("review.header_card"), m.currentIdx+1, len(m.cards))))
 		b.WriteString("\n\n")
@@ -737,10 +754,11 @@ func (m reviewModel) View() string {
 		b.WriteString(LabelStyle.Render(
 			fmt.Sprintf(i18n.T("review.complete"), len(m.cards))))
 		b.WriteString("\n\n")
-		b.WriteString(DimStyle.Render("Press any key to return..."))
+		b.WriteString(DimStyle.Render(i18n.T("common.press_any_key")))
 	}
 
-	return b.String()
+	m.viewport.SetContent(b.String())
+	return m.viewport.View()
 }
 
 // ---- Detail Model ----
@@ -801,37 +819,67 @@ func (m deckModel) View() string {
 		return DimStyle.Render(i18n.T("deck.empty"))
 	}
 
-	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(LabelStyle.Render(i18n.T("deck.stats_title")))
-	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  %s        %d\n", LabelStyle.Render(i18n.T("deck.total")+":"), m.stats.Total))
-	b.WriteString(fmt.Sprintf("  %s          %d\n", LabelStyle.Render(i18n.T("deck.due")+":"), m.stats.Due))
-	b.WriteString(fmt.Sprintf("  %s          %d\n", LabelStyle.Render(i18n.T("deck.new")+":"), m.stats.New))
-	b.WriteString(fmt.Sprintf("  %s       %d\n", LabelStyle.Render(i18n.T("deck.mature")+":"), m.stats.Mature))
+	type row struct {
+		label string
+		value string
+	}
+	var rows []row
+
+	rows = append(rows, row{i18n.T("deck.total") + ":", fmt.Sprintf("%d", m.stats.Total)})
+	rows = append(rows, row{i18n.T("deck.due") + ":", fmt.Sprintf("%d", m.stats.Due)})
+	rows = append(rows, row{i18n.T("deck.new") + ":", fmt.Sprintf("%d", m.stats.New)})
+	rows = append(rows, row{i18n.T("deck.mature") + ":", fmt.Sprintf("%d", m.stats.Mature)})
 
 	if m.stats.NextDelta != "" {
 		if m.stats.Overdue {
-			b.WriteString(fmt.Sprintf("  %s         %s%s\n",
-				LabelStyle.Render(i18n.T("deck.next")+":"),
-				m.stats.NextDelta,
-				WarnStyle.Render(" ago")))
+			rows = append(rows, row{
+				i18n.T("deck.next") + ":",
+				m.stats.NextDelta + WarnStyle.Render(" ago"),
+			})
 		} else {
-			b.WriteString(fmt.Sprintf("  %s         in %s\n",
-				LabelStyle.Render(i18n.T("deck.next")+":"),
-				m.stats.NextDelta))
+			rows = append(rows, row{
+				i18n.T("deck.next") + ":",
+				"in " + m.stats.NextDelta,
+			})
 		}
 	}
 
 	if m.stats.Leeches > 0 {
-		b.WriteString(fmt.Sprintf("  %s      %d\n",
-			LabelStyle.Render(i18n.T("deck.leeches")+":"), m.stats.Leeches))
+		rows = append(rows, row{i18n.T("deck.leeches") + ":", fmt.Sprintf("%d", m.stats.Leeches)})
 	}
 
-	b.WriteString(fmt.Sprintf("  %s     %.0f%%\n",
-		LabelStyle.Render(i18n.T("deck.avg_ease")+":"), m.stats.AvgEase*100))
+	rows = append(rows, row{i18n.T("deck.avg_ease") + ":", fmt.Sprintf("%.0f%%", m.stats.AvgEase*100)})
+
+	maxLabelWidth := 0
+	for _, r := range rows {
+		w := lipgloss.Width(r.label)
+		if w > maxLabelWidth {
+			maxLabelWidth = w
+		}
+	}
+
+	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("Press any key to return..."))
+	b.WriteString(LabelStyle.Render(i18n.T("deck.stats_title")))
+	b.WriteString("\n\n")
+
+	for _, r := range rows {
+		styledLabel := LabelStyle.Render(r.label)
+		labelWidth := lipgloss.Width(styledLabel)
+		pad := maxLabelWidth - labelWidth
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString("  ")
+		b.WriteString(styledLabel)
+		b.WriteString(strings.Repeat(" ", pad))
+		b.WriteString(" ")
+		b.WriteString(r.value)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(DimStyle.Render(i18n.T("common.press_any_key")))
 	return b.String()
 }
 
@@ -898,7 +946,7 @@ func (m helpModel) View() string {
 		"    " + i18n.T("help.item_ctrlc"),
 		"    " + i18n.T("help.item_esc"),
 		"",
-		DimStyle.Render("  " + i18n.T("help.close")),
+		DimStyle.Render("  " + i18n.T("common.press_any_key")),
 	}
 	return strings.Join(lines, "\n")
 }

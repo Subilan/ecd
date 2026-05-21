@@ -57,10 +57,10 @@ var table = map[string]stringEntry{
 
 	"synonym.no_entries": {LangEN: "No entries found for '%s'.", LangZH: "未找到 '%s' 的词条。"},
 	"synonym.not_found":  {LangEN: "No synonyms found for '%s'.", LangZH: "未找到 '%s' 的同义词。"},
-	"synonym.found":      {LangEN: "Found %d synonym(s)", LangZH: "找到 %d 个同义词"},
+	"synonym.found":      {LangEN: "Found %[1]d synonym(s) for %[2]s", LangZH: "找到 %[2]s 的 %[1]d 个同义词"},
 	"synonym.usage":      {LangEN: "Usage: /syn <word>", LangZH: "用法：/syn <单词>"},
 	"antonym.not_found":  {LangEN: "No antonyms found for '%s'.", LangZH: "未找到 '%s' 的反义词。"},
-	"antonym.found":      {LangEN: "Found %d antonym(s)", LangZH: "找到 %d 个反义词"},
+	"antonym.found":      {LangEN: "Found %[1]d antonym(s) for %[2]s", LangZH: "找到 %[2]s 的 %[1]d 个反义词"},
 	"antonym.usage":      {LangEN: "Usage: /ant <word>", LangZH: "用法：/ant <单词>"},
 
 	"search.no_results":   {LangEN: "No results for: %s", LangZH: "未找到结果：%s"},
@@ -129,7 +129,10 @@ var table = map[string]stringEntry{
 	"help.item_exit":         {LangEN: "/exit, /quit, /q      Quit", LangZH: "/exit, /quit, /q      退出"},
 	"help.item_ctrlc":        {LangEN: "Ctrl+C                Force quit", LangZH: "Ctrl+C                强制退出"},
 	"help.item_esc":          {LangEN: "Esc                   Clear input / go back", LangZH: "Esc                   清空输入 / 返回"},
-	"help.close":             {LangEN: "Press Esc to close", LangZH: "按 Esc 关闭"},
+	"common.press_any_key":     {LangEN: "Press any key to return", LangZH: "按任意键返回"},
+	"common.initializing":      {LangEN: "Initializing...", LangZH: "初始化中…"},
+	"common.search_placeholder": {LangEN: "Search English or Chinese...", LangZH: "输入英文或中文进行查询…"},
+	"interactive.lang_usage":   {LangEN: "Usage: /lang en|zh  (current: %s)", LangZH: "用法：/lang en|zh  (当前：%s)"},
 }
 
 func T(key string, args ...interface{}) string {
