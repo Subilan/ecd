@@ -1,6 +1,6 @@
 # ecd
 
-![](./screenshot.png)
+![](./img/screenshot.png)
 
 ecd 是一个在命令行中运行的英汉词典。
 
@@ -8,19 +8,31 @@ ecd 是一个在命令行中运行的英汉词典。
 
 - 日常词典数据呈现，支持英文精确匹配、前缀匹配和模糊匹配，支持中文反查（根据释义和例句搜索），支持随机抽词。
 - 同义词、反义词查找。该功能基于词典数据，仅支持查找有记录的同义词或反义词，一些较为显然的词语例如 _good_ 和 _bad_ 之间可能并未记录反义关系。
-  ![](./synonym.png)
+  ![](./img/synonym.png)
 - 习语查找。
-  ![](./idiom.png)
+  ![](./img/idiom.png)
 - 记忆卡片。可将单词加入到卡片组中，定期复习，帮助记忆。该部分设计基于 SM-2 算法。
-  ![](./card2.png)
+  ![](./img/card2.png)
+- AI 集成。可接入任何 OpenAI 格式的模型接口，实现借助 AI 对单词进行解释、造句、对比含义、寻找同义词或反义词等。
+  ![](./img/ai-diff.png)
+
+<details>
+<summary>更多 AI 集成用例</summary>
+<ul>
+  <li>解释词语含义<img src="./img/ai-explain.png" alt="AI 解释"></li>
+  <li>寻找同义词<br><img src="./img/ai-syn.png" alt="同义词"></li>
+  <li>造短语<br><img src="./img/ai-phr.png" alt="短语"></li>
+  <li>造句子<br><img src="./img/ai-example.png" alt="例句"></li>
+</ul>
+</details>
 
 ## 开始使用
 
 1. 从最新构建中下载二进制文件，复制到本地某个位置
-   - [ecd-darwin-arm64 (Apple Silicon Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-amd64.zip)
-   - [ecd-darwin-amd64 (Intel Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-arm64.zip)
-   - [ecd-linux-amd64](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-linux-amd64.zip)
-   - [ecd-windows-amd64.exe](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-windows-amd64.exe.zip)
+    - [ecd-darwin-arm64 (Apple Silicon Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-amd64.zip)
+    - [ecd-darwin-amd64 (Intel Mac)](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-darwin-arm64.zip)
+    - [ecd-linux-amd64](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-linux-amd64.zip)
+    - [ecd-windows-amd64.exe](https://nightly.link/Subilan/ecd/workflows/ci/main/ecd-windows-amd64.exe.zip)
 2. 获取词汇数据库 `ecd.db`（~100MB），并放置在与二进制文件同目录下（也可以是不同目录，详见配置文件）
 
 > [!NOTE]
@@ -93,6 +105,26 @@ ecd
 | `/exit` `/quit` `/q` Ctrl+C | 退出                                            |
 | Esc                         | 清空输入框                                      |
 | Tab                         | 切换页面滚动，用于浏览上下溢出的搜索结果        |
+
+## AI 模式
+
+通过 `--ai` 参数或在交互模式下输入 `/ai` 进入 AI 模式，可接入任何 OpenAI 兼容的模型接口。首次使用需通过 `/init` 配置 API 密钥、接口地址和模型。
+
+| 命令                            | 说明                                         |
+| ------------------------------- | -------------------------------------------- |
+| `/init`                         | 打开配置表单（API 密钥、接口地址、模型选择） |
+| `/diff <w1> <w2> ...`           | 对比最多 5 个单词的语义和用法差异            |
+| `/ant <word> [one\|some\|many]` | 生成反义词，可选数量 one/some/many           |
+| `/syn <word> [one\|some\|many]` | 生成同义词，可选数量 one/some/many           |
+| `/phr <word> [one\|some\|many]` | 生成包含该单词的短语，可选数量 one/some/many |
+| `/example <word>`               | 生成例句                                     |
+| `/explain <word>`               | 详细解释单词（释义、词源、用法说明、例句）   |
+| `/cache [on\|off]`              | 开启/关闭 AI 响应缓存                        |
+| `/back`                         | 返回词典查询                                 |
+| `/help`                         | 显示 AI 模式帮助信息                         |
+
+> [!TIP]
+> 在 AI 命令末尾添加 `!` 可绕过缓存，例如 `/syn! happy many`。
 
 ## 记忆卡片
 
