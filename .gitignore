@@ -5,4 +5,4 @@ __pycache__/
 extract/.venv/
 .claude/
 .DS_Store
-ecd-go
+ecd.toml
