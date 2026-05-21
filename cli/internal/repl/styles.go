@@ -8,4 +8,5 @@ var (
 	DimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	WarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	TitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+	PronStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 )

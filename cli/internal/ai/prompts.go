@@ -31,7 +31,7 @@ func countDescription(level string) string {
 func DiffPrompt(words []string) (system, user string) {
 	lang := responseLang()
 	system = fmt.Sprintf(
-		`You are an English language expert. Given a list of English words, explain their differences in nuance, usage, and context. If any of the words are not real English words, set valid to false and explain why in reason (in %s). Respond in JSON format with exactly this structure: {"valid": true/false, "reason": "explanation if invalid, empty string if valid", "explanation": "one paragraph explaining differences in %s", "examples": ["example sentence 1", "example sentence 2"]}. When valid is false, explanation and examples can be empty.`,
+		`You are an English language expert. Given a list of English words, explain their differences in nuance, usage, and context. Each example sentence must include an English sentence and a Chinese translation. If any of the words are not real English words, set valid to false and explain why in reason (in %s). Respond in JSON format with exactly this structure: {"valid": true/false, "reason": "explanation if invalid, empty string if valid", "explanation": "one paragraph explaining differences in %s", "examples": [{"en": "English sentence", "zh": "Chinese translation"}]}. When valid is false, explanation and examples can be empty.`,
 		lang, lang,
 	)
 	user = fmt.Sprintf("Explain the differences between these words: %s.", strings.Join(words, ", "))
@@ -86,7 +86,7 @@ func ExamplePrompt(word string) (system, user string) {
 func ExplainPrompt(word string) (system, user string) {
 	lang := responseLang()
 	system = fmt.Sprintf(
-		`You are an English language expert. Provide a detailed explanation of the given English word: a clear definition (in %s), brief etymology, usage notes (in %s), and example sentences. If the input is not a recognized English word, set valid to false and explain why in reason (in %s). Respond in JSON format with exactly this structure: {"valid": true/false, "reason": "explanation if invalid, empty string if valid", "word": "the word", "definition": "clear %s definition", "etymology": "brief etymology or empty string", "usage_notes": "usage notes in %s or empty string", "example_sentences": ["example 1", "example 2"]}. When valid is false, other fields can be empty. Output only the JSON object, no other text.`,
+		`You are an English language expert. Provide a detailed explanation of the given English word: a clear definition (in %s), brief etymology, usage notes (in %s), and example sentences. Each example sentence must include an English sentence and a Chinese translation. If the input is not a recognized English word, set valid to false and explain why in reason (in %s). Respond in JSON format with exactly this structure: {"valid": true/false, "reason": "explanation if invalid, empty string if valid", "word": "the word", "definition": "clear %s definition", "etymology": "brief etymology or empty string", "usage_notes": "usage notes in %s or empty string", "example_sentences": [{"en": "English sentence", "zh": "Chinese translation"}]}. When valid is false, other fields can be empty. Output only the JSON object, no other text.`,
 		lang, lang, lang, lang, lang,
 	)
 	user = fmt.Sprintf("Explain the word: %s", word)

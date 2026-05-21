@@ -52,6 +52,9 @@ type Model struct {
 	// Context for search operations
 	searchCtx *search.Context
 
+	// State to return to when exiting help
+	helpReturnState AppState
+
 	// Status message shown below the footer
 	statusMsg string
 	statusSeq int // incremented on each new message; timer only clears if seq matches
@@ -123,7 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.review, _ = m.review.Update(msg)
 		m.ai, _ = m.ai.Update(msg)
 		if m.state == StateHelp {
-			m.help.setContent(msg.Width, msg.Height)
+			m.help.resizeContent(msg.Width, msg.Height)
 		}
 		return m, nil
 
@@ -165,15 +168,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help, cmd = m.help.Update(msg)
 				return m, cmd
 			case "esc", "q":
-				m.state = StateSearch
-				m.search.restoreScrollPos()
-				m.search.Input.Focus()
-				return m, nil
+				return m.exitHelp()
 			default:
-				m.state = StateSearch
-				m.search.restoreScrollPos()
-				m.search.Input.Focus()
-				return m, nil
+				return m.exitHelp()
 			}
 
 		case StateConfirmReset:
@@ -243,6 +240,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ai.SetConfig(m.aiCfg)
 		m.state = StateAI
 		return m, m.setStatus(i18n.T("ai.config_saved"))
+
+	case ai.ShowHelpMsg:
+		m.helpReturnState = StateAI
+		m.state = StateHelp
+		m.help.setContent(ai.BuildAIHelp(), m.width, m.height)
+		return m, nil
 
 	case searchDoneMsg:
 		if msg.result.Entries != nil {
@@ -355,8 +358,9 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "/help":
+		m.helpReturnState = StateSearch
 		m.state = StateHelp
-		m.help.setContent(m.width, m.height)
+		m.help.setContent(buildSearchHelp(), m.width, m.height)
 
 	case "/lang":
 		switch strings.ToLower(arg) {
@@ -371,6 +375,8 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		default:
 			m.statusMsg = i18n.T("interactive.lang_usage", i18n.GetLang())
 		}
+		m.search.Input.Placeholder = i18n.T("common.search_placeholder")
+		m.ai.Input.Placeholder = i18n.T("ai.placeholder")
 		return m, m.statusTimerCmd()
 
 	case "/syn":
@@ -583,6 +589,15 @@ func (m Model) updateReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) setStatus(msg string) tea.Cmd {
 	m.statusMsg = msg
 	return m.statusTimerCmd()
+}
+
+func (m *Model) exitHelp() (tea.Model, tea.Cmd) {
+	m.state = m.helpReturnState
+	if m.helpReturnState == StateSearch {
+		m.search.restoreScrollPos()
+		m.search.Input.Focus()
+	}
+	return m, nil
 }
 
 func (m Model) updateAI(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1075,12 +1090,43 @@ func (m *Model) flashcardStatusesForChinese(results []dict.ChineseResult) map[st
 
 type helpModel struct {
 	viewport viewport.Model
+	content  string
 	ready    bool
 }
 
 func newHelpModel() helpModel { return helpModel{} }
 
-func (m *helpModel) setContent(width, height int) {
+func (m *helpModel) setContent(content string, width, height int) {
+	m.content = content
+	vpHeight := height - 2
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.viewport = viewport.New(width, vpHeight)
+	m.viewport.SetContent(content)
+	m.ready = true
+}
+
+func (m *helpModel) resizeContent(width, height int) {
+	if m.content != "" {
+		m.setContent(m.content, width, height)
+	}
+}
+
+func (m helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+func (m helpModel) View() string {
+	if !m.ready {
+		return ""
+	}
+	return m.viewport.View()
+}
+
+func buildSearchHelp() string {
 	lines := []string{
 		"",
 		TitleStyle.Render("  " + i18n.T("help.title")),
@@ -1092,7 +1138,7 @@ func (m *helpModel) setContent(width, height int) {
 		"    " + i18n.T("help.item_syn"),
 		"    " + i18n.T("help.item_ant"),
 		"    " + i18n.T("help.item_idm"),
-			"    " + i18n.T("help.item_ai"),
+		"    " + i18n.T("help.item_ai"),
 		"",
 		"  " + LabelStyle.Render(i18n.T("help.section_flashcards")),
 		"    " + i18n.T("help.item_add"),
@@ -1111,26 +1157,5 @@ func (m *helpModel) setContent(width, height int) {
 		"",
 		DimStyle.Render("  " + i18n.T("common.press_any_key")),
 	}
-	content := strings.Join(lines, "\n")
-
-	vpHeight := height - 2
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-	m.viewport = viewport.New(width, vpHeight)
-	m.viewport.SetContent(content)
-	m.ready = true
-}
-
-func (m helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
-}
-
-func (m helpModel) View() string {
-	if !m.ready {
-		return ""
-	}
-	return m.viewport.View()
+	return strings.Join(lines, "\n")
 }

@@ -186,8 +186,9 @@ var table = map[string]stringEntry{
 		"ai.label.usage_notes":     {LangEN: "Usage", LangZH: "用法说明"},
 
 		// AI help
-		"ai.help_header":     {LangEN: "AI Commands:", LangZH: "AI 命令："},
-		"ai.help_back":       {LangEN: "Return to dictionary search mode", LangZH: "返回词典搜索模式"},
+		"ai.help_header":            {LangEN: "AI Commands:", LangZH: "AI 命令："},
+		"ai.help_section_commands":  {LangEN: "Commands", LangZH: "命令"},
+		"ai.help_back":              {LangEN: "Return to dictionary search mode", LangZH: "返回词典搜索模式"},
 		"ai.help_init":       {LangEN: "Configure API key, base URL, model", LangZH: "配置 API 密钥、base URL、模型"},
 		"ai.help_cache":      {LangEN: "Toggle AI cache", LangZH: "切换 AI 缓存"},
 		"ai.help_diff":       {LangEN: "Explain differences between words", LangZH: "解释单词间的区别"},

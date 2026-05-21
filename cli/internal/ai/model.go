@@ -11,6 +11,7 @@ import (
 	"github.com/Subilan/ecd/internal/i18n"
 	"github.com/Subilan/ecd/internal/render"
 	"github.com/Subilan/ecd/internal/repl"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,7 @@ var (
 	aiErrStyle   = repl.WarnStyle
 	aiWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	aiTitleStyle = repl.TitleStyle
+	aiPronStyle  = repl.PronStyle
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -53,6 +55,7 @@ type AIModel struct {
 	waiting    bool
 	spinnerIdx int
 	result     string
+	focusInput bool // true = input receives keys, false = viewport scrolls
 }
 
 // NewAIModel creates a new AI mode sub-model.
@@ -64,10 +67,18 @@ func NewAIModel(cfg *config.AIConfig) AIModel {
 	ti.Focus()
 
 	vp := viewport.New(80, 20)
+	// Strip single-char bindings so they don't conflict with typing.
+	vp.KeyMap = viewport.KeyMap{
+		PageDown:     key.NewBinding(key.WithKeys("pgdown")),
+		PageUp:       key.NewBinding(key.WithKeys("pgup")),
+		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d")),
+		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u")),
+	}
 
 	return AIModel{
-		Base: repl.NewBase(ti, vp),
-		cfg:  cfg,
+		Base:       repl.NewBase(ti, vp),
+		cfg:        cfg,
+		focusInput: true,
 	}
 }
 
@@ -124,12 +135,41 @@ func (m AIModel) Update(msg tea.Msg) (AIModel, tea.Cmd) {
 		case "esc":
 			m.Input.SetValue("")
 			return m, nil
+
+		case "tab":
+			m.focusInput = !m.focusInput
+			return m, nil
+
+		case "up":
+			if !m.focusInput {
+				m.Viewport.ScrollUp(1)
+				return m, nil
+			}
+
+		case "down":
+			if !m.focusInput {
+				m.Viewport.ScrollDown(1)
+				return m, nil
+			}
 		}
 	}
 
+	var cmds []tea.Cmd
+
+	// Always forward to text input
 	var cmd tea.Cmd
 	m.Input, cmd = m.Input.Update(msg)
-	return m, cmd
+	cmds = append(cmds, cmd)
+
+	// Forward to viewport (scroll keys work when !focusInput, or pgup/pgdown/non-key msgs)
+	if !m.focusInput {
+		m.Viewport, cmd = m.Viewport.Update(msg)
+	} else {
+		_, cmd = m.Viewport.Update(msg) // still handle non-key msgs
+	}
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 // View implements tea.Model.
@@ -163,6 +203,10 @@ func (m AIModel) renderFooter() string {
 
 	if !m.cfg.IsConfigured() {
 		b.WriteString("  " + aiErrStyle.Render(i18n.T("ai.footer_no_config")))
+	}
+
+	if !m.focusInput {
+		b.WriteString("  " + aiPronStyle.Render("SCROLL"))
 	}
 
 	if s := m.StatusMsg(); s != "" {
@@ -206,10 +250,9 @@ func (m *AIModel) executeCommand(input string) tea.Cmd {
 		}
 
 	case "/help":
-		m.result = buildAIHelp()
-		m.Viewport.SetContent(render.WrapContent(m.result, m.Viewport.Width))
-		m.Viewport.GotoTop()
-		return nil
+		return func() tea.Msg {
+			return ShowHelpMsg{}
+		}
 
 	case "/cache":
 		switch strings.ToLower(arg) {
@@ -421,9 +464,20 @@ func formatDiffResult(b *strings.Builder, parsed map[string]any) {
 		b.WriteString(aiLabelStyle.Render(i18n.T("ai.label.examples")))
 		b.WriteString("\n")
 		for i, ex := range examples {
-			if s, ok := ex.(string); ok {
-				b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, s))
+			entry, ok := ex.(map[string]any)
+			if !ok {
+				continue
 			}
+			en, _ := entry["en"].(string)
+			zh, _ := entry["zh"].(string)
+			if en == "" && zh == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  %d. %s", i+1, en))
+			if zh != "" {
+				b.WriteString(fmt.Sprintf(" / %s", zh))
+			}
+			b.WriteString("\n")
 		}
 	}
 }
@@ -506,38 +560,47 @@ func formatExplainResult(b *strings.Builder, parsed map[string]any) {
 		b.WriteString(aiLabelStyle.Render(i18n.T("ai.label.examples")))
 		b.WriteString("\n")
 		for i, ex := range examples {
-			if s, ok := ex.(string); ok {
-				b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, s))
+			entry, ok := ex.(map[string]any)
+			if !ok {
+				continue
 			}
+			en, _ := entry["en"].(string)
+			zh, _ := entry["zh"].(string)
+			if en == "" && zh == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  %d. %s", i+1, en))
+			if zh != "" {
+				b.WriteString(fmt.Sprintf(" / %s", zh))
+			}
+			b.WriteString("\n")
 		}
 	}
 }
 
-func buildAIHelp() string {
-	var b strings.Builder
-	b.WriteString(aiTitleStyle.Render(i18n.T("ai.help_header")))
-	b.WriteString("\n\n")
-
-	items := []struct{ cmd, desc string }{
-		{"/back", i18n.T("ai.help_back")},
-		{"/init", i18n.T("ai.help_init")},
-		{"/cache on|off", i18n.T("ai.help_cache")},
-		{"/diff <w1> <w2> ...", i18n.T("ai.help_diff")},
-		{"/ant <word> [one|some|many]", i18n.T("ai.help_ant")},
-		{"/syn <word> [one|some|many]", i18n.T("ai.help_syn")},
-		{"/phr <word> [one|some|many]", i18n.T("ai.help_phr")},
-		{"/example <word>", i18n.T("ai.help_example")},
-		{"/explain <word>", i18n.T("ai.help_explain")},
-		{"/help", i18n.T("ai.help_help")},
+// BuildAIHelp builds the AI command help text.
+func BuildAIHelp() string {
+	lines := []string{
+		"",
+		aiTitleStyle.Render("  " + i18n.T("ai.help_header")),
+		"",
+		"  " + aiLabelStyle.Render(i18n.T("ai.help_section_commands")),
+		"    " + aiWordStyle.Render("/back") + aiDimStyle.Render("  —  " + i18n.T("ai.help_back")),
+		"    " + aiWordStyle.Render("/init") + aiDimStyle.Render("  —  " + i18n.T("ai.help_init")),
+		"    " + aiWordStyle.Render("/cache on|off") + aiDimStyle.Render("  —  " + i18n.T("ai.help_cache")),
+		"    " + aiWordStyle.Render("/diff <w1> <w2> ...") + aiDimStyle.Render("  —  " + i18n.T("ai.help_diff")),
+		"    " + aiWordStyle.Render("/ant <word> [one|some|many]") + aiDimStyle.Render("  —  " + i18n.T("ai.help_ant")),
+		"    " + aiWordStyle.Render("/syn <word> [one|some|many]") + aiDimStyle.Render("  —  " + i18n.T("ai.help_syn")),
+		"    " + aiWordStyle.Render("/phr <word> [one|some|many]") + aiDimStyle.Render("  —  " + i18n.T("ai.help_phr")),
+		"    " + aiWordStyle.Render("/example <word>") + aiDimStyle.Render("  —  " + i18n.T("ai.help_example")),
+		"    " + aiWordStyle.Render("/explain <word>") + aiDimStyle.Render("  —  " + i18n.T("ai.help_explain")),
+		"    " + aiWordStyle.Render("/help") + aiDimStyle.Render("  —  " + i18n.T("ai.help_help")),
+		"",
+		aiDimStyle.Render("  " + i18n.T("ai.help_cache_hint")),
+		"",
+		aiDimStyle.Render("  " + i18n.T("common.press_any_key")),
 	}
-	for _, item := range items {
-		b.WriteString(fmt.Sprintf("  %s", aiWordStyle.Render(item.cmd)))
-		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("    %s\n", aiDimStyle.Render(item.desc)))
-	}
-	b.WriteString("\n")
-	b.WriteString(aiDimStyle.Render(i18n.T("ai.help_cache_hint")))
-	return b.String()
+	return strings.Join(lines, "\n")
 }
 
 // TransitionToSearchMsg signals the parent model to switch back to search.
@@ -548,3 +611,6 @@ type TransitionToAIMsg struct{}
 
 // EnterInitMsg signals the parent model to enter init config mode.
 type EnterInitMsg struct{}
+
+// ShowHelpMsg signals the parent model to show the help screen in AI mode.
+type ShowHelpMsg struct{}

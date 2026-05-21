@@ -21,8 +21,7 @@ const (
 
 var (
 	// Base styles
-	SourceStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // cyan
-	PronStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple
+	SourceStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // cyan
 
 	// Shared styles (aliased from repl package)
 	WordStyle  = repl.WordStyle
@@ -30,6 +29,7 @@ var (
 	DimStyle   = repl.DimStyle
 	WarnStyle  = repl.WarnStyle
 	TitleStyle = repl.TitleStyle
+	PronStyle  = repl.PronStyle
 	FooterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(1, 0, 1, 0)
 	StatusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Padding(0, 1)
 	SelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("3"))
