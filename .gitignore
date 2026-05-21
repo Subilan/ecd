@@ -6,3 +6,4 @@ extract/.venv/
 .claude/
 .DS_Store
 ecd.toml
+ecd

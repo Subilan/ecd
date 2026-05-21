@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: ecd-linux-amd64
+          - os: macos-latest
+            binary: ecd-darwin-amd64
+          - os: macos-latest
+            binary: ecd-darwin-arm64
+            goarch: arm64
+          - os: windows-latest
+            binary: ecd-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: cli/go.sum
+
+      - name: Vet
+        run: cd cli && go vet ./...
+
+      - name: Test
+        run: cd cli && go test ./...
+
+      - name: Build
+        env:
+          GOARCH: ${{ matrix.goarch || 'amd64' }}
+        run: cd cli && go build -o ../${{ matrix.binary }} .
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: ${{ matrix.binary }}
