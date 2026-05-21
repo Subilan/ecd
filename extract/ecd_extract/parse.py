@@ -14,11 +14,13 @@ from .oxford import is_oxford_xref, parse_oxford_regular, parse_oxford_xref
 
 
 def parse_tabfile(filepath, source):
-    """Parse a tabfile, return (entry_rows, example_batches, synonym_batches, antonym_batches)."""
+    """Parse a tabfile, return (entry_rows, example_batches, synonym_batches, antonym_batches, idiom_rows, idiom_example_batches)."""
     entry_rows = []
     example_batches = []
     synonym_batches = []
     antonym_batches = []
+    idiom_rows = []
+    idiom_example_batches = []
 
     with open(filepath, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -53,11 +55,30 @@ def parse_tabfile(filepath, source):
                 pron = _extract_collins_pronunciation(tree)
                 for e in entries:
                     e["pronunciation"] = pron
+                page_idiom_data = []
+                page_idiom_examples = []
             else:
                 if is_oxford_xref(tree):
-                    entries, entry_synonyms, entry_antonyms = parse_oxford_xref(tree, word)
+                    entries, entry_synonyms, entry_antonyms, page_idiom_data, page_idiom_examples = parse_oxford_xref(tree, word)
                 else:
-                    entries, entry_synonyms, entry_antonyms = parse_oxford_regular(tree, word)
+                    entries, entry_synonyms, entry_antonyms, page_idiom_data, page_idiom_examples = parse_oxford_regular(tree, word)
+
+                # Collect idiom data from this page
+                for idiom in page_idiom_data:
+                    idiom_rows.append(
+                        (
+                            idiom.get("word", word),
+                            idiom["idiom_phrase"],
+                            idiom["cn_definition"],
+                        )
+                    )
+                for ex_list in page_idiom_examples:
+                    idiom_example_batches.append(
+                        [
+                            (en, cn, i + 1)
+                            for i, (en, cn) in enumerate(ex_list)
+                        ]
+                    )
 
             for entry in entries:
                 entry_rows.append(
@@ -80,4 +101,4 @@ def parse_tabfile(filepath, source):
                 synonym_batches.append(entry_synonyms.pop(0) if entry_synonyms else [])
                 antonym_batches.append(entry_antonyms.pop(0) if entry_antonyms else [])
 
-    return entry_rows, example_batches, synonym_batches, antonym_batches
+    return entry_rows, example_batches, synonym_batches, antonym_batches, idiom_rows, idiom_example_batches

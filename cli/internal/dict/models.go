@@ -36,3 +36,10 @@ type ChineseResult struct {
 	CnDef    string
 	Examples []string
 }
+
+// Idiom is an Oxford idiom entry from the oxford_idioms table.
+type Idiom struct {
+	IdiomPhrase  string   `json:"idiom_phrase"`
+	CnDefinition string   `json:"cn_definition"`
+	Examples     []string `json:"-"`
+}

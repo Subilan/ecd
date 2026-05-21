@@ -33,6 +33,10 @@ var table = map[string]stringEntry{
 	"note.phrase":    {LangEN: "Phrase", LangZH: "短语"},
 	"note.general":   {LangEN: "Note", LangZH: "注"},
 
+	"idiom.not_found": {LangEN: "No idioms found for '%s'.", LangZH: "未找到 '%s' 的习语。"},
+	"idiom.found":     {LangEN: "Found %[1]d idiom(s) for %[2]s", LangZH: "找到 %[2]s 的 %[1]d 个习语"},
+	"help.item_idm":   {LangEN: "/idm <word>          Show idioms", LangZH: "/idm <单词>         显示习语"},
+
 	"interactive.welcome": {
 		LangEN: "ecd interactive mode. Type .help for commands, .exit or Ctrl-D to quit.",
 		LangZH: "ecd 交互模式。输入 .help 查看命令，.exit 或 Ctrl-D 退出。",

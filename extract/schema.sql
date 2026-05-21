@@ -85,3 +85,14 @@ CREATE TABLE IF NOT EXISTS antonyms (
 
 CREATE INDEX IF NOT EXISTS idx_antonyms_entry ON antonyms(source, entry_id);
 CREATE INDEX IF NOT EXISTS idx_antonyms_word ON antonyms(antonym_word);
+
+-- Oxford idioms: extracted from .ids-g blocks, queried via /idm command
+CREATE TABLE IF NOT EXISTS oxford_idioms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word TEXT NOT NULL,
+    idiom_phrase TEXT NOT NULL,
+    cn_definition TEXT,
+    examples TEXT  -- JSON array of [en, cn] pairs, nullable
+);
+
+CREATE INDEX IF NOT EXISTS idx_oxford_idioms_word ON oxford_idioms(word);

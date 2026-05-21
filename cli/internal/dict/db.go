@@ -343,3 +343,36 @@ func (d *DB) RandomWord(source *string) (string, error) {
 	}
 	return word, nil
 }
+
+// GetIdioms returns all Oxford idioms for a word.
+func (d *DB) GetIdioms(word string) ([]Idiom, error) {
+	rows, err := d.Query(
+		"SELECT idiom_phrase, cn_definition, examples FROM oxford_idioms WHERE word = ? ORDER BY id",
+		word,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("idioms: %w", err)
+	}
+	defer rows.Close()
+
+	var idioms []Idiom
+	for rows.Next() {
+		var i Idiom
+		var examplesJSON sql.NullString
+		if err := rows.Scan(&i.IdiomPhrase, &i.CnDefinition, &examplesJSON); err != nil {
+			return nil, fmt.Errorf("scan idiom: %w", err)
+		}
+		if examplesJSON.Valid {
+			var pairs [][]string
+			if err := json.Unmarshal([]byte(examplesJSON.String), &pairs); err == nil {
+				for _, p := range pairs {
+					if len(p) == 2 {
+						i.Examples = append(i.Examples, p[0]+" / "+p[1])
+					}
+				}
+			}
+		}
+		idioms = append(idioms, i)
+	}
+	return idioms, rows.Err()
+}

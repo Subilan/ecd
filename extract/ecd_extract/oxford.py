@@ -61,7 +61,7 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ], [[]], [[]]
+        ], [[]], [[]], [], []
 
     # Derived-form xref: .derived with a link to parent word
     derived = tree.cssselect(".entry > .derived")
@@ -87,9 +87,9 @@ def parse_oxford_xref(tree, word):
                 "pronunciation": None,
                 "extra_notes": None,
             }
-        ], [[]], [[]]
+        ], [[]], [[]], [], []
 
-    return [], [[]], [[]]
+    return [], [[]], [[]], [], []
 
 
 def _oxford_pos_for_ng(n_g, base_pos_spans):
@@ -99,6 +99,73 @@ def _oxford_pos_for_ng(n_g, base_pos_spans):
     if gr:
         return f"{base} {gr}" if base else gr
     return base
+
+
+def _oxford_extract_cn_def(def_g):
+    """Extract Chinese definition from a def-g element.
+
+    Prefers .oalecd8e_chn inside .d or .ud (actual definitions) over
+    those inside .label-g (usage notes / grammar labels).
+    """
+    cn_parts = []
+    for d_el in def_g.cssselect(".d, .ud"):
+        for chn in d_el.cssselect(".oalecd8e_chn"):
+            text = chn.text_content().strip()
+            if text:
+                cn_parts.append(text)
+    if cn_parts:
+        return "；".join(cn_parts)
+    chn = def_g.cssselect(".oalecd8e_chn")
+    return chn[0].text_content().strip() if chn else ""
+
+
+def _extract_oxford_idioms(container_el):
+    """Extract idioms from .ids-g elements inside container_el.
+
+    If container_el itself is an ids-g element, processes it directly.
+    Returns (idiom_data, idiom_examples) where:
+      idiom_data = [{"idiom_phrase": str, "cn_definition": str}, ...]
+      idiom_examples = [[(en, cn), ...], ...] aligned with idiom_data
+    """
+    idiom_data = []
+    idiom_examples = []
+    classes = (container_el.get("class", "") or "").split()
+    if "ids-g" in classes:
+        ids_containers = [container_el]
+    else:
+        ids_containers = container_el.cssselect(".ids-g")
+    for ids_container in ids_containers:
+        for id_g in ids_container.cssselect(".id-g"):
+            id_span = id_g.cssselect(".id")
+            idiom_phrase = (
+                id_span[0].text_content().strip() if id_span else ""
+            )
+
+            sense_g = id_g.cssselect(".sense-g")
+            if not sense_g:
+                continue
+            sense_g = sense_g[0]
+
+            def_g = sense_g.cssselect(".def-g")
+            cn_def = _oxford_extract_cn_def(def_g[0]) if def_g else ""
+            if not cn_def and not idiom_phrase:
+                continue
+
+            examples = []
+            for x_g in sense_g.cssselect(".x-g"):
+                en_span = x_g.cssselect(".x")
+                cn_span = x_g.cssselect(".oalecd8e_chn")
+                en_text = en_span[0].text_content().strip() if en_span else ""
+                cn_text = cn_span[0].text_content().strip() if cn_span else ""
+                if en_text or cn_text:
+                    examples.append((en_text, cn_text))
+
+            idiom_data.append({
+                "idiom_phrase": idiom_phrase,
+                "cn_definition": cn_def,
+            })
+            idiom_examples.append(examples)
+    return idiom_data, idiom_examples
 
 
 def _oxford_extract_examples(n_g):
@@ -142,8 +209,7 @@ def _oxford_parse_pg_direct(p_g, word, pos_spans, top_g=None):
     ]
 
     for def_g in def_g_children:
-        chn = def_g.cssselect(".oalecd8e_chn")
-        cn_def = chn[0].text_content().strip() if chn else ""
+        cn_def = _oxford_extract_cn_def(def_g)
 
         examples = []
         for x_g in x_g_children:
@@ -204,8 +270,7 @@ def _oxford_parse_hg_direct(h_g, word, base_pos_spans, top_g):
     x_gs_in_hg = h_g.cssselect(".x-g")
 
     for def_g in def_gs:
-        chn = def_g.cssselect(".oalecd8e_chn")
-        cn_def = chn[0].text_content().strip() if chn else ""
+        cn_def = _oxford_extract_cn_def(def_g)
         if not cn_def:
             continue
 
@@ -249,57 +314,10 @@ def _oxford_parse_hg_direct(h_g, word, base_pos_spans, top_g):
         entry_synonyms.append(syns)
         entry_antonyms.append(ants)
 
-    # Pattern 4b: ids-g (idioms) — each id-g becomes a separate entry
-    ids_g = h_g.cssselect(".ids-g")
-    for ids_container in ids_g:
-        for id_g in ids_container.cssselect(".id-g"):
-            id_span = id_g.cssselect(".id")
-            idiom_phrase = (
-                id_span[0].text_content().strip() if id_span else ""
-            )
+    # Pattern 4b: ids-g (idioms) — return as separate idiom data
+    hg_idiom_data, hg_idiom_examples = _extract_oxford_idioms(h_g)
 
-            sense_g = id_g.cssselect(".sense-g")
-            if not sense_g:
-                continue
-            sense_g = sense_g[0]
-
-            chn = sense_g.cssselect(".def-g .oalecd8e_chn")
-            cn_def = chn[0].text_content().strip() if chn else ""
-            if not cn_def:
-                continue
-
-            examples = []
-            for x_g in sense_g.cssselect(".x-g"):
-                en_span = x_g.cssselect(".x")
-                cn_span = x_g.cssselect(".oalecd8e_chn")
-                en_text = en_span[0].text_content().strip() if en_span else ""
-                cn_text = (
-                    cn_span[0].text_content().strip() if cn_span else ""
-                )
-                if en_text or cn_text:
-                    examples.append((en_text, cn_text))
-
-            entries.append(
-                {
-                    "word": word,
-                    "pos": f"IDM {idiom_phrase}" if idiom_phrase else "IDM",
-                    "cn_definition": cn_def,
-                    "cross_ref": None,
-                    "sense_order": len(
-                        [e for e in entries if e["pos"] == f"IDM {idiom_phrase}"]
-                    )
-                    + 1,
-                    "examples": examples,
-                    "pronunciation": pron,
-                    "extra_notes": None,
-                }
-            )
-            # Extract xrefs from sense_g for this idiom entry
-            syns, ants = _extract_oxford_xrefs(sense_g)
-            entry_synonyms.append(syns)
-            entry_antonyms.append(ants)
-
-    return entries, entry_synonyms, entry_antonyms
+    return entries, entry_synonyms, entry_antonyms, hg_idiom_data, hg_idiom_examples
 
 
 def _extract_oxford_xrefs(container_el):
@@ -337,9 +355,11 @@ def parse_oxford_regular(tree, word):
     entries = []
     entry_synonyms = []
     entry_antonyms = []
+    all_idiom_data = []
+    all_idiom_examples = []
     entry_el = tree.cssselect(".entry")
     if not entry_el:
-        return [], [[]], [[]]
+        return [], [[]], [[]], [], []
     entry_el = entry_el[0]
 
     top_gs = entry_el.cssselect(".top-g")
@@ -356,11 +376,16 @@ def parse_oxford_regular(tree, word):
 
             pron = _extract_oxford_pronunciation(p_g, top_g)
 
+            p_g_idiom_data, p_g_idiom_examples = _extract_oxford_idioms(p_g)
+            if p_g_idiom_data:
+                all_idiom_data.extend(p_g_idiom_data)
+                all_idiom_examples.extend(p_g_idiom_examples)
+
             n_gs = p_g.cssselect(".n-g")
             if n_gs:
                 for n_g in n_gs:
-                    chn = n_g.cssselect(".def-g .oalecd8e_chn")
-                    cn_def = chn[0].text_content().strip() if chn else ""
+                    def_g = n_g.cssselect(".def-g")
+                    cn_def = _oxford_extract_cn_def(def_g[0]) if def_g else ""
 
                     pos = _oxford_pos_for_ng(n_g, pos_spans)
                     entries.append(
@@ -398,7 +423,7 @@ def parse_oxford_regular(tree, word):
             pos_spans = tree.cssselect(".top-g > .pos-g .pos")
         h_g = tree.cssselect(".h-g")
         if not h_g:
-            return [], [[]], [[]]
+            return [], [[]], [[]], [], []
         h_g = h_g[0]
 
         pron = _extract_oxford_pronunciation(top_g) if top_g is not None else None
@@ -406,8 +431,8 @@ def parse_oxford_regular(tree, word):
         n_gs = list(child_elements(h_g, class_contains="n-g"))
         if n_gs:
             for n_g in n_gs:
-                chn = n_g.cssselect(".def-g .oalecd8e_chn")
-                cn_def = chn[0].text_content().strip() if chn else ""
+                def_g = n_g.cssselect(".def-g")
+                cn_def = _oxford_extract_cn_def(def_g[0]) if def_g else ""
 
                 pos = _oxford_pos_for_ng(n_g, pos_spans)
                 entries.append(
@@ -430,17 +455,73 @@ def parse_oxford_regular(tree, word):
                 entry_antonyms.append(ants)
         else:
             # Pattern 4: No .n-g — def-g / ids-g / x-g are direct children of h-g
-            hg_entries, hg_syns, hg_ants = _oxford_parse_hg_direct(h_g, word, pos_spans, top_g)
+            hg_entries, hg_syns, hg_ants, hg_idiom_data, hg_idiom_examples = (
+                _oxford_parse_hg_direct(h_g, word, pos_spans, top_g)
+            )
             entries += hg_entries
             entry_synonyms += hg_syns
             entry_antonyms += hg_ants
+            if hg_idiom_data:
+                all_idiom_data.extend(hg_idiom_data)
+                all_idiom_examples.extend(hg_idiom_examples)
+
+    # Entry-level idioms: ids-g as direct children of .entry (outside h-g/p-g)
+    entry_ids_children = [
+        c for c in entry_el
+        if c.tag == "span" and "ids-g" in (c.get("class", "") or "").split()
+    ]
+    for ids_c in entry_ids_children:
+        el_idiom_data, el_idiom_examples = _extract_oxford_idioms(ids_c)
+        if el_idiom_data:
+            all_idiom_data.extend(el_idiom_data)
+            all_idiom_examples.extend(el_idiom_examples)
+
+    # Fill in word for all idiom entries
+    for i in all_idiom_data:
+        i["word"] = word
+
+    # Words with only idioms: create minimal entry to ensure word is searchable
+    if not entries and all_idiom_data:
+        entries.append(
+            {
+                "word": word,
+                "pos": "",
+                "cn_definition": "",
+                "cross_ref": None,
+                "sense_order": 1,
+                "examples": [],
+                "pronunciation": (
+                    _extract_oxford_pronunciation(top_g)
+                    if top_g is not None
+                    else None
+                ),
+                "extra_notes": None,
+                "_idiom_host": True,
+            }
+        )
+        entry_synonyms.append([])
+        entry_antonyms.append([])
 
     # Filter out entries with no definition and no examples
     # (e.g. abbreviation expansions with no Chinese translation)
-    filtered = [e for e in entries if e["cn_definition"] or e["examples"]]
+    # Keep idiom-only entries that serve as hosts for /idm lookup
+    filtered = [
+        e for e in entries
+        if e["cn_definition"] or e["examples"] or e.get("_idiom_host")
+    ]
+
+    # Clean up internal marker
+    for e in filtered:
+        e.pop("_idiom_host", None)
 
     # Filter synonym/antonym lists to match filtered entries
-    filtered_syns = [s for e, s in zip(entries, entry_synonyms) if e["cn_definition"] or e["examples"]]
-    filtered_ants = [a for e, a in zip(entries, entry_antonyms) if e["cn_definition"] or e["examples"]]
+    filtered_syns = [
+        s for e, s in zip(entries, entry_synonyms)
+        if e["cn_definition"] or e["examples"] or e.get("_idiom_host")
+    ]
+    filtered_ants = [
+        a for e, a in zip(entries, entry_antonyms)
+        if e["cn_definition"] or e["examples"] or e.get("_idiom_host")
+    ]
 
-    return filtered, filtered_syns, filtered_ants
+    return filtered, filtered_syns, filtered_ants, all_idiom_data, all_idiom_examples

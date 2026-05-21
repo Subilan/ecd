@@ -31,6 +31,7 @@ type args struct {
 	NoColor    bool
 	Query      string
 	ConfigPath string
+	Idm        string
 }
 
 func parseArgs() args {
@@ -44,6 +45,11 @@ func parseArgs() args {
 			}
 		case "-r", "--random":
 			a.Random = true
+		case "-i", "--idm":
+			if i+1 < len(os.Args) {
+				a.Idm = os.Args[i+1]
+				i++
+			}
 		case "--no-color":
 			a.NoColor = true
 		case "--config":
@@ -117,6 +123,13 @@ func run(a args) error {
 	}
 
 	switch {
+	case a.Idm != "":
+		idioms, err := dictDB.GetIdioms(a.Idm)
+		if err != nil || len(idioms) == 0 {
+			fmt.Printf("%s\n", cli.C("label", i18n.T("idiom.not_found", a.Idm)))
+			return nil
+		}
+		cli.PrintIdioms(idioms, a.Idm)
 	case a.Random:
 		word, err := dictDB.RandomWord(srcPtr)
 		if err != nil {

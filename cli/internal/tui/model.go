@@ -347,6 +347,39 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		m.search.viewport.SetContent(m.search.renderResults())
 		m.search.viewport.GotoTop()
 
+	case "/idm":
+		word := arg
+		if word == "" {
+			word = m.lastWord
+		}
+		if word == "" {
+			return m, m.setStatus(i18n.T("del.usage"))
+		}
+		idioms, err := m.DictDB.GetIdioms(word)
+		if err != nil {
+			return m, m.setStatus(i18n.T("idiom.not_found", word))
+		}
+		if len(idioms) == 0 {
+			return m, m.setStatus(i18n.T("idiom.not_found", word))
+		}
+		var items []searchResultItem
+		items = append(items, searchResultItem{
+			header: LabelStyle.Render(i18n.T("idiom.found", len(idioms), word)),
+		})
+		for _, idiom := range idioms {
+			line := WordStyle.Render(idiom.IdiomPhrase)
+			if idiom.CnDefinition != "" {
+				line += "  " + idiom.CnDefinition
+			}
+			items = append(items, searchResultItem{
+				header:  line,
+				examples: idiom.Examples,
+			})
+		}
+		m.search.results = items
+		m.search.viewport.SetContent(m.search.renderResults())
+		m.search.viewport.GotoTop()
+
 	case "/add":
 		word := arg
 		if word == "" {
@@ -930,6 +963,7 @@ func (m helpModel) View() string {
 		"    " + i18n.T("help.item_random"),
 		"    " + i18n.T("help.item_syn"),
 		"    " + i18n.T("help.item_ant"),
+		"    " + i18n.T("help.item_idm"),
 		"",
 		"  " + LabelStyle.Render(i18n.T("help.section_flashcards")),
 		"    " + i18n.T("help.item_add"),

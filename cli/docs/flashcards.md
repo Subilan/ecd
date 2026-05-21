@@ -83,9 +83,10 @@ Easy (3):
 1. `/review` → `startReview()`：查询 `next_review <= now` 的卡片，最多 20 张
 2. 无到期卡片 → 显示提示消息
 3. `reviewFront`：显示单词和发音，按 `Enter` 翻面
-4. `reviewBack`：显示全部释义（`←` / `→` 切换义项），按 `0`-`3` 评分
+4. `reviewBack`：通过 `viewport.Model` 渲染释义，支持自动换行和 `↑`/`↓`/`PgUp`/`PgDn` 滚动；`←` / `→` 切换义项，`0`-`3` 评分
 5. 评分后 `applyRating()` → `Schedule()` → `UpdateFlashcard()`，进入下一张
 6. 所有卡片完成 → `reviewComplete`，显示统计，任意键返回
+7. 终端窗口 resize 时自动调整布局（`WindowSizeMsg` 转发至 review model）
 
 ## 牌组统计 (`/deck`)
 

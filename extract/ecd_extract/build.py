@@ -1,5 +1,6 @@
 """Database build orchestrator — creates schema, runs extraction, inserts data."""
 
+import json
 import os
 import sqlite3
 import sys
@@ -40,7 +41,7 @@ def build_db(db_path=None, dicts_to_process=None, dict_paths=None):
             extract_tabfile(dict_path, tabfile)
 
             print(f"Parsing {source} entries...", file=sys.stderr)
-            entry_rows, example_batches, synonym_batches, antonym_batches = parse_tabfile(tabfile, source)
+            entry_rows, example_batches, synonym_batches, antonym_batches, idiom_rows, idiom_example_batches = parse_tabfile(tabfile, source)
 
             table = f"{source}_entries"
             print(
@@ -116,6 +117,26 @@ def build_db(db_path=None, dicts_to_process=None, dict_paths=None):
                 conn.commit()
                 print(
                     f"Inserting {len(antonym_rows)} antonyms...",
+                    file=sys.stderr,
+                )
+
+            # Insert Oxford idioms
+            if source == "oxford" and idiom_rows:
+                conn.execute("BEGIN")
+                for idiom_row, ex_batch in zip(idiom_rows, idiom_example_batches):
+                    examples_json = None
+                    if ex_batch:
+                        examples_json = json.dumps(
+                            [[en, cn] for en, cn, _ in ex_batch],
+                            ensure_ascii=False,
+                        )
+                    conn.execute(
+                        "INSERT INTO oxford_idioms (word, idiom_phrase, cn_definition, examples) VALUES (?, ?, ?, ?)",
+                        (idiom_row[0], idiom_row[1], idiom_row[2], examples_json),
+                    )
+                conn.commit()
+                print(
+                    f"Inserting {len(idiom_rows)} idioms into oxford_idioms...",
                     file=sys.stderr,
                 )
 

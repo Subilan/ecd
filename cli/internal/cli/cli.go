@@ -204,6 +204,23 @@ func noteTypeLabel(noteType string) string {
 	return noteType
 }
 
+// PrintIdioms prints Oxford idiom results in CLI mode.
+func PrintIdioms(idioms []dict.Idiom, word string) {
+	fmt.Printf("%s\n",
+		C("label", i18n.T("idiom.found", len(idioms), word)))
+	for _, idiom := range idioms {
+		fmt.Printf("  %s", C("word", idiom.IdiomPhrase))
+		if idiom.CnDefinition != "" {
+			fmt.Printf("  %s", idiom.CnDefinition)
+		}
+		fmt.Println()
+		for _, ex := range idiom.Examples {
+			fmt.Printf("    %s %s\n",
+				C("label", i18n.T("label.example")+":"), ex)
+		}
+	}
+}
+
 // PrintFlashcardEntry prints one dictionary entry for flashcard review.
 func PrintFlashcardEntry(entry dict.Entry, idx, total int) {
 	src := i18n.T("source." + entry.Source)

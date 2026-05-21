@@ -50,8 +50,8 @@ Model (model.go)
 ├── searchModel (search_view.go)
 │   ├── textinput.Model   — 搜索输入框
 │   └── viewport.Model    — 结果滚动区域
-├── detailModel           — 词条详情（预留）
-├── reviewModel           — 闪卡复习
+├── detailModel           — 词条详情（内含 viewport.Model）
+├── reviewModel           — 闪卡复习（内含 viewport.Model，支持滚动和自动换行）
 ├── deckModel             — 牌组统计
 └── helpModel             — 帮助页面
 ```
@@ -90,6 +90,8 @@ Model (model.go)
 | `Enter` | 翻面（显示答案） |
 | `←` / `→` | 切换义项（多义项时） |
 | `0`-`3` | 评分：Again / Hard / Good / Easy |
+| `↑` / `↓` | 滚动释义（内容超出屏幕时） |
+| `PgUp` / `PgDn` | 翻页滚动 |
 | 任意键 | 复习完成后返回搜索界面 |
 
 ## 命令列表
