@@ -81,10 +81,7 @@ func NewModel(dictDB *dict.DB, historyDB *history.DB) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.search.Init(),
-		func() tea.Msg { return tea.WindowSizeMsg{} },
-	)
+	return m.search.Init()
 }
 
 // ---- Messages ----
@@ -764,8 +761,8 @@ func (m detailModel) Init() tea.Cmd { return nil }
 func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.viewport.Width = msg.Width - 2
-		m.viewport.Height = msg.Height - 4
+		m.viewport.Width = max(1, msg.Width-2)
+		m.viewport.Height = max(1, msg.Height-4)
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)

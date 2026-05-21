@@ -75,9 +75,9 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = msg.Width - 4
-		m.viewport.Width = msg.Width - 2
-		m.viewport.Height = msg.Height - 7
+		m.input.Width = max(1, msg.Width-4)
+		m.viewport.Width = max(1, msg.Width-2)
+		m.viewport.Height = max(1, msg.Height-7)
 
 	case tea.KeyMsg:
 		switch msg.String() {
