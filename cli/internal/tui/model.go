@@ -292,9 +292,13 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		if len(synResults) == 0 {
 			return m, m.setStatus(i18n.T("synonym.not_found", word))
 		}
+		var totalSyns int
+		for _, sr := range synResults {
+			totalSyns += len(sr.Items)
+		}
 		var items []searchResultItem
 		items = append(items, searchResultItem{
-			header: LabelStyle.Render(i18n.T("synonym.found_groups", len(synResults))),
+			header: LabelStyle.Render(i18n.T("synonym.found", totalSyns)),
 		})
 		for _, sr := range synResults {
 			for _, s := range sr.Items {
@@ -324,9 +328,13 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 		if len(antResults) == 0 {
 			return m, m.setStatus(i18n.T("antonym.not_found", word))
 		}
+		var totalAnts int
+		for _, ar := range antResults {
+			totalAnts += len(ar.Items)
+		}
 		var items []searchResultItem
 		items = append(items, searchResultItem{
-			header: LabelStyle.Render(i18n.T("antonym.found_groups", len(antResults))),
+			header: LabelStyle.Render(i18n.T("antonym.found", totalAnts)),
 		})
 		for _, ar := range antResults {
 			for _, a := range ar.Items {
@@ -478,10 +486,14 @@ func (m Model) View() string {
 
 func (m Model) renderFooter() string {
 	var b strings.Builder
-	b.WriteString(DimStyle.Render("/help for help, /quit to quit"))
+	b.WriteString(DimStyle.Render(i18n.T("footer.hint")))
 
 	if m.autoAdd {
 		b.WriteString("  " + DimStyle.Render("[auto]"))
+	}
+
+	if !m.search.focusInput {
+		b.WriteString("  " + PronStyle.Render("SCROLL"))
 	}
 
 	if m.statusMsg != "" {
@@ -865,32 +877,31 @@ func (m helpModel) Update(msg tea.Msg) (helpModel, tea.Cmd) {
 func (m helpModel) View() string {
 	lines := []string{
 		"",
-		TitleStyle.Render("  Commands"),
+		TitleStyle.Render("  " + i18n.T("help.title")),
 		"",
-		"  Type any English or Chinese text to search.",
-		"  Commands start with / and are typed in the search bar.",
+		"  " + i18n.T("help.desc"),
 		"",
-		"  " + LabelStyle.Render("Search"),
-		"    /random               Show a random word",
-		"    /syn [word]           Show synonyms",
-		"    /ant [word]           Show antonyms",
+		"  " + LabelStyle.Render(i18n.T("help.section_search")),
+		"    " + i18n.T("help.item_random"),
+		"    " + i18n.T("help.item_syn"),
+		"    " + i18n.T("help.item_ant"),
 		"",
-		"  " + LabelStyle.Render("Flashcards"),
-		"    /add [word]           Add word to deck",
-		"    /del <word>           Remove word from deck",
-		"    /auto-add [on|off]    Toggle auto-add",
-		"    /review               Start review session",
-		"    /deck                 Deck statistics",
-		"    /reset                Reset all cards",
+		"  " + LabelStyle.Render(i18n.T("help.section_flashcards")),
+		"    " + i18n.T("help.item_add"),
+		"    " + i18n.T("help.item_del"),
+		"    " + i18n.T("help.item_auto_add"),
+		"    " + i18n.T("help.item_review"),
+		"    " + i18n.T("help.item_deck"),
+		"    " + i18n.T("help.item_reset"),
 		"",
-		"  " + LabelStyle.Render("General"),
-		"    /help                 Show this help",
-		"    /lang [en|zh]         Switch language",
-		"    /exit, /quit, /q      Quit",
-		"    Ctrl+C                Force quit",
-		"    Esc                   Clear input / go back",
+		"  " + LabelStyle.Render(i18n.T("help.section_general")),
+		"    " + i18n.T("help.item_help"),
+		"    " + i18n.T("help.item_lang"),
+		"    " + i18n.T("help.item_exit"),
+		"    " + i18n.T("help.item_ctrlc"),
+		"    " + i18n.T("help.item_esc"),
 		"",
-		DimStyle.Render("  Press Esc to close"),
+		DimStyle.Render("  " + i18n.T("help.close")),
 	}
 	return strings.Join(lines, "\n")
 }

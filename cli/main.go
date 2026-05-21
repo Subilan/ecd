@@ -105,7 +105,7 @@ func run(a args) error {
 	default:
 		if isatty.IsTerminal(os.Stdin.Fd()) {
 			model := tui.NewModel(dictDB, historyDB)
-			p := tea.NewProgram(model, tea.WithAltScreen())
+			p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 			if _, err := p.Run(); err != nil {
 				return err
 			}

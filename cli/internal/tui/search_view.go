@@ -26,6 +26,8 @@ type searchModel struct {
 	history      []string // search history ring buffer
 	historyIdx   int      // -1 = not navigating, 0..len-1 = active
 	historySaved string   // input text before history navigation started
+
+	focusInput bool // true = input receives arrows (history), false = viewport receives arrows (scroll)
 }
 
 type searchResultItem struct {
@@ -56,8 +58,9 @@ func newSearchModel() searchModel {
 	}
 
 	return searchModel{
-		input:    ti,
-		viewport: vp,
+		input:      ti,
+		viewport:   vp,
+		focusInput: true,
 	}
 }
 
@@ -85,12 +88,24 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 			m.viewport.SetContent("")
 			return m, nil
 
+		case "tab":
+			m.focusInput = !m.focusInput
+			return m, nil
+
 		case "up":
-			m.historyUp()
+			if m.focusInput {
+				m.historyUp()
+			} else {
+				m.viewport.ScrollUp(1)
+			}
 			return m, nil
 
 		case "down":
-			m.historyDown()
+			if m.focusInput {
+				m.historyDown()
+			} else {
+				m.viewport.ScrollDown(1)
+			}
 			return m, nil
 		}
 	}
