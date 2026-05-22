@@ -18,13 +18,22 @@ def extract_tabfile(dict_path, output_path):
         result.check_returncode()
 
 
+_PUNCT_CLEAN_RE = re.compile(r"\s+([,.;:?!])|\(\s+|\s+\)")
+
+
+def _clean_spacing(text):
+    """Remove spurious spaces around English punctuation introduced by
+    joining separate HTML text nodes with spaces."""
+    return _PUNCT_CLEAN_RE.sub(lambda m: m.group(0).strip(), text)
+
+
 def itertext(el):
     parts = []
     for t in el.itertext():
         s = t.strip()
         if s:
             parts.append(s)
-    return " ".join(parts)
+    return _clean_spacing(" ".join(parts))
 
 
 def child_elements(el, tag=None, class_contains=None):

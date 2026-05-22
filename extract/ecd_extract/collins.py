@@ -155,17 +155,26 @@ def _extract_notes_from_figures(figures):
         # Combine definition and examples into a single note
         parts_en = [en_text] if en_text else []
         parts_cn = [cn_text] if cn_text else []
+        # Pad to keep lists aligned — the renderer assumes enLines[i]
+        # maps to cnLines[i]. If one side has a definition and the
+        # other doesn't, line-by-line alignment would drift.
+        while len(parts_en) < len(parts_cn):
+            parts_en.append("")
+        while len(parts_cn) < len(parts_en):
+            parts_cn.append("")
         for ex_en, ex_cn in examples:
             if ex_en and ex_cn:
                 parts_en.append(ex_en)
                 parts_cn.append(ex_cn)
             elif ex_en:
                 parts_en.append(ex_en)
+                parts_cn.append("")
             elif ex_cn:
+                parts_en.append("")
                 parts_cn.append(ex_cn)
 
-        final_en = "\n".join(parts_en).strip()
-        final_cn = "\n".join(parts_cn).strip()
+        final_en = "\n".join(parts_en).rstrip("\n")
+        final_cn = "\n".join(parts_cn).rstrip("\n")
         if final_en or final_cn:
             notes.append(
                 {"type": note_type, "en": final_en, "cn": final_cn}
