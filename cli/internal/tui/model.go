@@ -270,6 +270,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search.Viewport.SetContent(m.search.renderResults())
 		m.search.Viewport.GotoTop()
 
+		// Sync lastWord from search context so slash commands can use it
+		m.lastWord = *m.searchCtx.LastWord
+
 		// Auto-add
 		if m.autoAdd && *m.searchCtx.LastWord != "" {
 			m.HistoryDB.AddFlashcard(*m.searchCtx.LastWord)
@@ -457,7 +460,7 @@ func (m *Model) handleSlashCommand(query string) (tea.Model, tea.Cmd) {
 			word = m.lastWord
 		}
 		if word == "" {
-			return m, m.setStatus(i18n.T("del.usage"))
+			return m, m.setStatus(i18n.T("idiom.usage"))
 		}
 		idioms, err := m.DictDB.GetIdioms(word)
 		if err != nil {
