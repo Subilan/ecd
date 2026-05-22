@@ -22,10 +22,6 @@ type searchModel struct {
 	err          string
 	savedYOffset int
 
-	history      []string // search history ring buffer
-	historyIdx   int      // -1 = not navigating, 0..len-1 = active
-	historySaved string   // input text before history navigation started
-
 	focusInput bool // true = input receives arrows (history), false = viewport receives arrows (scroll)
 }
 
@@ -87,7 +83,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 		case "up":
 			if m.focusInput {
-				m.historyUp()
+				m.Base.HistoryUp()
 			} else {
 				m.Viewport.ScrollUp(1)
 			}
@@ -95,7 +91,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 		case "down":
 			if m.focusInput {
-				m.historyDown()
+				m.Base.HistoryDown()
 			} else {
 				m.Viewport.ScrollDown(1)
 			}
@@ -111,12 +107,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 	newQuery := strings.TrimSpace(m.Input.Value())
 	if newQuery != m.query {
 		m.query = newQuery
-		// If the query no longer matches the history entry at the current
-		// index (user typed or deleted a character), exit history mode.
-		if m.historyIdx >= 0 && m.historyIdx < len(m.history) &&
-			m.history[m.historyIdx] != newQuery {
-			m.historyIdx = -1
-		}
+		m.Base.ResetHistoryIfChanged(newQuery)
 	}
 
 	m.Viewport, cmd = m.Viewport.Update(msg)
@@ -278,53 +269,6 @@ func (m *searchModel) saveScrollPos() {
 
 func (m *searchModel) restoreScrollPos() {
 	m.Viewport.SetYOffset(m.savedYOffset)
-}
-
-const maxHistory = 100
-
-func (m *searchModel) addHistory(query string) {
-	if query == "" {
-		return
-	}
-	// Dedup consecutive duplicates.
-	if len(m.history) > 0 && m.history[len(m.history)-1] == query {
-		return
-	}
-	m.history = append(m.history, query)
-	// Trim from front if over capacity.
-	if len(m.history) > maxHistory {
-		m.history = m.history[len(m.history)-maxHistory:]
-	}
-	m.historyIdx = -1
-}
-
-func (m *searchModel) historyUp() {
-	if len(m.history) == 0 {
-		return
-	}
-	if m.historyIdx == -1 {
-		m.historySaved = m.Input.Value()
-		m.historyIdx = len(m.history) - 1
-	} else if m.historyIdx > 0 {
-		m.historyIdx--
-	}
-	m.Input.SetValue(m.history[m.historyIdx])
-	m.Input.CursorEnd()
-}
-
-func (m *searchModel) historyDown() {
-	if m.historyIdx == -1 {
-		return
-	}
-	if m.historyIdx < len(m.history)-1 {
-		m.historyIdx++
-		m.Input.SetValue(m.history[m.historyIdx])
-		m.Input.CursorEnd()
-	} else {
-		m.historyIdx = -1
-		m.Input.SetValue(m.historySaved)
-		m.historySaved = ""
-	}
 }
 
 func buildChineseItems(results []dict.ChineseResult, statuses map[string]string) []searchResultItem {

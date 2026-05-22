@@ -51,6 +51,7 @@ func (m AIModel) Update(msg tea.Msg) (AIModel, tea.Cmd) {
 			if query == "" {
 				return m, nil
 			}
+			m.Base.AddHistory(query)
 			m.Input.SetValue("")
 			return m, m.executeCommand(query)
 
@@ -63,16 +64,20 @@ func (m AIModel) Update(msg tea.Msg) (AIModel, tea.Cmd) {
 			return m, nil
 
 		case "up":
-			if !m.focusInput {
+			if m.focusInput {
+				m.Base.HistoryUp()
+			} else {
 				m.Viewport.ScrollUp(1)
-				return m, nil
 			}
+			return m, nil
 
 		case "down":
-			if !m.focusInput {
+			if m.focusInput {
+				m.Base.HistoryDown()
+			} else {
 				m.Viewport.ScrollDown(1)
-				return m, nil
 			}
+			return m, nil
 		}
 	}
 
@@ -82,6 +87,8 @@ func (m AIModel) Update(msg tea.Msg) (AIModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.Input, cmd = m.Input.Update(msg)
 	cmds = append(cmds, cmd)
+
+	m.Base.ResetHistoryIfChanged(strings.TrimSpace(m.Input.Value()))
 
 	// Forward to viewport (scroll keys work when !focusInput, or pgup/pgdown/non-key msgs)
 	if !m.focusInput {

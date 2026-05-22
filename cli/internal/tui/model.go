@@ -324,6 +324,8 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		m.search.AddHistory(query)
+
 		// Check for /command
 		if strings.HasPrefix(query, "/") {
 			return m.handleSlashCommand(query)
@@ -331,7 +333,6 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		// Regular search — clear input after submit
 		m.statusMsg = ""
-		m.search.addHistory(query)
 		m.search.Input.SetValue("")
 		return m, m.doSearch(query, nil)
 	}
